@@ -135,12 +135,11 @@ const V2_CREATE_OK_NO_META = {
 
 /**
  * A `success: true` `/v2` create envelope with valid `meta.fx` but an order item
- * MISSING its `amount` field. `parseMoney(undefined)` dereferences
- * `m.canonical_amount` on `undefined` → a raw `TypeError` BEFORE the typed
- * `INVALID_MONEY` guard can fire. That raw `TypeError` is NOT a `SmscodeError`,
- * so without a catch-all wrapper it escapes the idempotency-stamp boundary
- * UNSTAMPED — yet the server returned 200 (the order may be placed/debited), so
- * the caller must be able to replay the SAME key (a fresh key → double charge).
+ * MISSING its `amount` field. `parseMoney(undefined)` now throws a typed
+ * `INVALID_MONEY` `SmscodeError`, and that error still needs the resolved
+ * idempotency key stamped onto it because the server returned 200 (the order may
+ * be placed/debited). The caller must be able to replay the SAME key; a fresh
+ * key could double charge.
  */
 const V2_CREATE_OK_MISSING_AMOUNT = {
   success: true,
@@ -151,7 +150,7 @@ const V2_CREATE_OK_MISSING_AMOUNT = {
         status: "ACTIVE",
         product_id: 1024,
         catalog_product_id: 88,
-        // No `amount` field at all → parseMoney(undefined) throws a raw TypeError.
+        // No `amount` field at all → parseMoney(undefined) throws typed INVALID_MONEY.
       },
     ],
     failed_count: 0,
@@ -508,11 +507,10 @@ describe("MONEY-SAFETY: a POST-SUCCESS decode error still carries the key", () =
       .create({ catalog_product_id: 88 }, { idempotencyKey: PROVIDED })
       .catch((e: unknown) => e)) as SmscodeError;
 
-    // `parseMoney(undefined)` throws a raw TypeError (m.canonical_amount on
-    // undefined) — pre-fix it escapes the catch UNSTAMPED. The catch-all wrapper
-    // must turn it into a TYPED SmscodeError so the boundary stamps the key: the
-    // 200 means the order may be placed/debited, so the caller must replay the
-    // SAME key (a fresh key would risk a double charge).
+    // Missing amount throws a typed INVALID_MONEY SmscodeError. The boundary still
+    // must stamp the resolved key: the 200 means the order may be placed/debited,
+    // so the caller must replay the SAME key (a fresh key would risk a double
+    // charge).
     expect(err).toBeInstanceOf(SmscodeError);
     expect(err).not.toBeInstanceOf(TypeError);
     expect(err.idempotencyKey).toBe(PROVIDED);
