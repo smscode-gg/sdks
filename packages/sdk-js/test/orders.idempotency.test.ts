@@ -456,7 +456,7 @@ describe("MONEY-SAFETY: retry exhaustion keeps the SAME key (never a new one)", 
   });
 });
 
-describe("MONEY-SAFETY: a POST-SUCCESS decode error still carries the key (swarm PI367-BLOCKER-1)", () => {
+describe("MONEY-SAFETY: a POST-SUCCESS decode error still carries the key", () => {
   const PROVIDED = "stable-key";
 
   it("/v2 success with an UNSAFE canonical_amount → INVALID_MONEY error carries the resolved key", async () => {
@@ -497,7 +497,7 @@ describe("MONEY-SAFETY: a POST-SUCCESS decode error still carries the key (swarm
     expect(err.idempotencyKey).toBe(PROVIDED);
   });
 
-  it("/v2 success with valid meta.fx but an order item MISSING `amount` → a TYPED SmscodeError (not a raw TypeError) carries the resolved key (PI367-BLOCKER-1B)", async () => {
+  it("/v2 success with valid meta.fx but an order item MISSING `amount` → a TYPED SmscodeError (not a raw TypeError) carries the resolved key", async () => {
     const calls: Captured[] = [];
     const client = new SmscodeClient({
       token: "t",

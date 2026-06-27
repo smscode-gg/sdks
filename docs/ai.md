@@ -7,7 +7,7 @@ Compact integration guidance for coding agents building on the SMSCode virtual-n
 
 ## Rules
 
-1. **Public surfaces only — `/v1` and `/v2`.** NEVER call `/internal`, `/admin`, or `/mobile`. Those are private surfaces (the web app, the admin panel, the Android app) and are not part of the public contract — they require different auth and can change without notice.
+1. **Public surfaces only — `/v1` and `/v2`.** Use only the documented public surfaces; do not depend on undocumented endpoints — they are outside the public contract and may change without notice.
 2. **Prefer `/v2` (USD-native).** `/v2` returns USD money objects with the exact IDR canonical amount and an FX receipt (`meta.fx`). `/v1` is the legacy IDR-only API (money is an integer in IDR minor units). Pick ONE version per integration; do not mix shapes.
 3. **Auth is `Authorization: Bearer <token>`** on every request (token from Account Settings). No cookies, no separate API-key header.
 4. **Idempotency is money safety.** Order create sends an `idempotency-key`. On a FAILED create, **retry with the SAME key — never mint a new one.** A new key on retry can double-charge you (the server dedups by key → at-most-once). With the SDK, the key is on the thrown error: reuse `error.idempotencyKey`.

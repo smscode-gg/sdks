@@ -24,8 +24,8 @@ info:
       with `/v1`; pick one per integration.
 
 
-    Only these public surfaces are documented here. The internal admin, web,
-    and mobile surfaces are private and out of scope.
+    Only `/v1` and `/v2` are documented as public surfaces. Undocumented
+    endpoints are out of scope and may change without notice.
 
 
     ## Authentication

@@ -252,7 +252,7 @@ describe("orders mutations — NO auto-retry (no idempotency key)", () => {
   });
 });
 
-describe("orders /v2 reads — TYPED error on a malformed 2xx envelope (swarm note)", () => {
+describe("orders /v2 reads — TYPED error on a malformed 2xx envelope", () => {
   // A `/v2` order summary with valid money but NO `meta.fx` on the 2xx envelope.
   // These are reads — no idempotency key is involved (do NOT assert one).
   const V2_ORDER_OK = {

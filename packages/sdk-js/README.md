@@ -7,7 +7,7 @@ Official TypeScript/JavaScript SDK for the [SMSCode](https://smscode.gg) virtual
 - **Typed errors**: branch on `instanceof` (or `err.code`), never on `err.message`.
 - **Zero runtime dependencies**, isomorphic (Node 18+, Bun, Deno, browsers — anything with `fetch` + Web Crypto).
 
-> AI agents: see [`docs/ai.md`](https://github.com/smscode-gg/sdks/blob/main/docs/ai.md) for compact integration rules. Coding agents should **prefer `/v2`** and **never** call `/internal`, `/admin`, or `/mobile`.
+> AI agents: see [`docs/ai.md`](https://github.com/smscode-gg/sdks/blob/main/docs/ai.md) for compact integration rules. Coding agents should **prefer `/v2`** and use only the documented public API surfaces.
 
 ## Install
 
