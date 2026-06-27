@@ -1,0 +1,3567 @@
+openapi: 3.1.0
+
+info:
+  title: SMSCode Public API
+  version: 1.0.0
+  summary: Virtual phone numbers for SMS verification — buy numbers, receive OTP codes, top up balance.
+  description: >-
+    Public REST API for [SMSCode](https://smscode.gg). Rent a virtual phone
+    number, poll for the inbound SMS verification code, and manage your balance
+    — all over a small, predictable JSON contract.
+
+
+    ## Surfaces
+
+
+    Two versioned, additive API surfaces share this one auth model and error
+    taxonomy:
+
+
+    - **`/v1`** — the established surface. All money is **IDR** (Indonesian
+      Rupiah), the canonical ledger currency. Integer minor units.
+    - **`/v2`** — the USD-native surface. The same IDR ledger, projected to a
+      structured money object with an `meta.fx` exchange-rate receipt. Coexists
+      with `/v1`; pick one per integration.
+
+
+    Only these public surfaces are documented here. The internal admin, web,
+    and mobile surfaces are private and out of scope.
+
+
+    ## Authentication
+
+
+    Every request is authenticated with a bearer token (your API key) sent in
+    the `Authorization` header:
+
+
+    ```
+    Authorization: Bearer <YOUR_API_KEY>
+    ```
+
+
+    Keep your API key server-side. It carries the full balance and ordering
+    authority of your account.
+
+
+    ## Response envelope
+
+
+    Responses follow a consistent envelope so success and failure are never
+    ambiguous:
+
+
+    - **Success:** `{ "success": true, "data": ..., "meta"?: ... }`
+    - **Failure:** `{ "success": false, "error": { "code": ..., "message": ...,
+      "details"?: ... } }`
+
+
+    `error.code` is a stable machine-readable enum (see `ErrorObject`); branch
+    on it, not on `error.message` (message text is human-facing and may change).
+    `error.details` and `meta` are present only when relevant — they are omitted
+    (not `null`) otherwise.
+
+
+    ## Idempotency
+
+
+    Write operations (e.g. creating an order or a deposit) accept an idempotency
+    key so a retried request is not double-applied. Reusing a key with a
+    different request body is rejected with `IDEMPOTENCY_KEY_REUSED`; a retry
+    while the original is still settling returns `REQUEST_IN_PROGRESS`.
+
+
+    ## Rate limiting and request size
+
+
+    State-changing endpoints are rate limited. When throttled you receive
+    `429` (`RATE_LIMIT_EXCEEDED`, or `TEMP_BANNED_ABUSE_GUARD` when an abuse
+    tripwire trips) with a `Retry-After` header. Request bodies are capped at
+    **1 MB**; a larger body is rejected with `413 Payload Too Large` before the
+    handler runs (this transport-level rejection has no `error.code` envelope).
+  contact:
+    name: SMSCode Support
+    url: https://smscode.gg
+  license:
+    name: Proprietary
+    url: https://smscode.gg
+
+servers:
+  - url: https://api.smscode.gg
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: v1
+    description: IDR-native public API surface.
+  - name: v2
+    description: USD-native public API surface (IDR ledger projected to USD with an FX receipt).
+
+paths:
+  # ───────────────────────── /v1 — IDR-native ─────────────────────────
+  /v1/catalog/countries:
+    get:
+      tags: [v1]
+      operationId: v1ListCountries
+      summary: List countries
+      description: >-
+        List every country in the catalog. Use a country's `id` to scope the
+        services and products endpoints. Cached briefly server-side.
+      responses:
+        '200':
+          description: The full list of countries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Country'
+              examples:
+                countries:
+                  value:
+                    success: true
+                    data:
+                      - id: 7
+                        code: id
+                        name: Indonesia
+                        dial_code: '62'
+                        emoji: 🇮🇩
+                        active: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/catalog/services:
+    get:
+      tags: [v1]
+      operationId: v1ListServices
+      summary: List services
+      description: >-
+        List the services (platforms) you can rent a number for — e.g.
+        WhatsApp, Telegram. Pass `country_id` to narrow the list to services
+        that currently have available, active products in that country.
+      parameters:
+        - $ref: '#/components/parameters/CountryIdQuery'
+      responses:
+        '200':
+          description: The list of services.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Service'
+              examples:
+                services:
+                  value:
+                    success: true
+                    data:
+                      - id: 1
+                        code: whatsapp
+                        name: WhatsApp
+                        active: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/catalog/products:
+    get:
+      tags: [v1]
+      operationId: v1ListProducts
+      summary: List products
+      description: >-
+        List orderable products (a service in a country at a price). Only
+        active products with available stock and an active provider are
+        returned. `price` is in **IDR** minor units (integer). Paginated.
+      parameters:
+        - $ref: '#/components/parameters/CountryIdQuery'
+        - $ref: '#/components/parameters/PlatformIdQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/SortQuery'
+      responses:
+        '200':
+          description: A page of products with pagination metadata.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Product'
+                      meta:
+                        $ref: '#/components/schemas/PaginationMeta'
+              examples:
+                products:
+                  value:
+                    success: true
+                    data:
+                      - id: 1024
+                        name: WhatsApp Indonesia
+                        country_id: 7
+                        platform_id: 1
+                        available: 142
+                        price: 750000
+                        active: true
+                        catalog_product_id: 88
+                    meta:
+                      page: 1
+                      limit: 1000
+                      count: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/catalog/exchange-rate:
+    get:
+      tags: [v1]
+      operationId: v1GetExchangeRate
+      summary: Get an exchange rate
+      description: >-
+        Look up a stored exchange rate by pair (default `USD/IDR`). `rate` is
+        `quote_per_base` as an integer (the quote-currency minor units per one
+        base unit). Returns `404` if the pair is not stored.
+      parameters:
+        - $ref: '#/components/parameters/PairQuery'
+      responses:
+        '200':
+          description: The exchange rate for the requested pair.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1ExchangeRate'
+              examples:
+                rate:
+                  value:
+                    success: true
+                    data:
+                      pair: USD/IDR
+                      base_currency: USD
+                      quote_currency: IDR
+                      rate: 16000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/balance:
+    get:
+      tags: [v1]
+      operationId: v1GetBalance
+      summary: Get account balance
+      description: >-
+        Return the authenticated account's balance in **IDR** minor units
+        (integer). The canonical ledger currency.
+      responses:
+        '200':
+          description: The current balance.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1Balance'
+              examples:
+                balance:
+                  value:
+                    success: true
+                    data:
+                      currency: IDR
+                      balance: 1250000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders:
+    get:
+      tags: [v1]
+      operationId: v1ListOrders
+      summary: List orders
+      description: >-
+        List the authenticated account's orders, most recent first. Paginate
+        with `limit`/`offset` and optionally narrow by `status`. Money
+        (`amount`) is in **IDR** minor units.
+      parameters:
+        - $ref: '#/components/parameters/OrderLimitQuery'
+        - $ref: '#/components/parameters/OrderOffsetQuery'
+        - $ref: '#/components/parameters/OrderStatusQuery'
+      responses:
+        '200':
+          description: The list of orders.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1OrderSummary'
+              examples:
+                orders:
+                  value:
+                    success: true
+                    data:
+                      - id: 90210
+                        status: ACTIVE
+                        created_at: '2026-05-11T09:00:00+00:00'
+                        product_id: 1024
+                        catalog_product_id: 88
+                        phone_number: '+6281234567890'
+                        amount: 750000
+                        otp_code: null
+                        otp_received_at: null
+                        expires_at: '2026-05-11T09:20:00+00:00'
+                        canceled_at: null
+                        failed_reason: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/active:
+    get:
+      tags: [v1]
+      operationId: v1ListActiveOrders
+      summary: List active orders
+      description: >-
+        List the account's currently active orders (`ACTIVE` and
+        `OTP_RECEIVED`), most recent first. A compact, money-free view —
+        status and OTP fields only, no `amount`. Poll this to pick up an
+        inbound verification code.
+      responses:
+        '200':
+          description: The list of active orders.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1OrderStatus'
+              examples:
+                active:
+                  value:
+                    success: true
+                    data:
+                      - id: 90210
+                        status: OTP_RECEIVED
+                        otp_code: '123456'
+                        otp_message: 'Your code is 123456'
+                        otp_received_at: '2026-05-11T09:01:30+00:00'
+                        expires_at: '2026-05-11T09:20:00+00:00'
+                        failed_reason: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/{id}:
+    get:
+      tags: [v1]
+      operationId: v1GetOrder
+      summary: Get an order
+      description: >-
+        Fetch a single order by id, scoped to the authenticated account.
+        Returns `404 NOT_FOUND` if the order does not exist or belongs to
+        another account. `amount` is in **IDR** minor units.
+      parameters:
+        - $ref: '#/components/parameters/OrderIdPath'
+      responses:
+        '200':
+          description: The requested order.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1OrderSummary'
+              examples:
+                order:
+                  value:
+                    success: true
+                    data:
+                      id: 90210
+                      status: COMPLETED
+                      created_at: '2026-05-11T09:00:00+00:00'
+                      product_id: 1024
+                      catalog_product_id: 88
+                      phone_number: '+6281234567890'
+                      amount: 750000
+                      otp_code: '123456'
+                      otp_received_at: '2026-05-11T09:01:30+00:00'
+                      expires_at: '2026-05-11T09:20:00+00:00'
+                      canceled_at: null
+                      failed_reason: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/create:
+    post:
+      tags: [v1]
+      operationId: v1CreateOrder
+      summary: Create an order
+      description: >-
+        Rent one or more numbers. Provide **exactly one** of `product_id`
+        (legacy direct-tier) or `catalog_product_id` (routed — best current
+        offer); both/neither → `422 VALIDATION_ERROR`. The price guard
+        (`max_price`, **IDR** integer), `prefer_provider`, and `policy` are
+        valid only with `catalog_product_id`.
+
+
+        This is an idempotent write — send an `idempotency-key` header to make
+        retries safe. Errors: `422 VALIDATION_ERROR` (bad/missing parameters),
+        `422 NO_OFFER_AVAILABLE` (no offer matches the product and policy),
+        `422 PROVIDER_ERROR` (an upstream provider rejected the order),
+        `422 IDEMPOTENCY_KEY_REUSED` (key reused with a different body),
+        `409 INSUFFICIENT_BALANCE` (balance too low), and
+        `409 REQUEST_IN_PROGRESS` (a request with this key is still settling).
+        Abuse-guard throttling surfaces as `429 TEMP_BANNED_ABUSE_GUARD`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1CreateOrderRequest'
+            examples:
+              routed:
+                summary: Routed order by catalog product
+                value:
+                  catalog_product_id: 88
+                  max_price: 800000
+                  policy: cheapest
+                  quantity: 1
+              legacy:
+                summary: Legacy order by product id
+                value:
+                  product_id: 1024
+                  quantity: 1
+      responses:
+        '200':
+          description: The created order(s).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1CreateOrderResult'
+              examples:
+                created:
+                  value:
+                    success: true
+                    data:
+                      orders:
+                        - id: 90210
+                          status: ACTIVE
+                          phone_number: '+6281234567890'
+                          otp_code: null
+                          otp_received_at: null
+                          expires_at: '2026-05-11T09:20:00+00:00'
+                          failed_reason: null
+                          product_id: 1024
+                          catalog_product_id: 88
+                          amount: 750000
+                      failed_count: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/cancel:
+    post:
+      tags: [v1]
+      operationId: v1CancelOrder
+      summary: Cancel an order
+      description: >-
+        Cancel an `ACTIVE` order and refund its amount to the balance. Money
+        (`refund_amount`, `new_balance`) is in **IDR** minor units. Errors:
+        `404 NOT_FOUND` (no such order, or it belongs to another account),
+        `409` carrying `CONFLICT` (the order is not in a cancelable state /
+        an OTP has already been received) or `CANCEL_TOO_EARLY` (canceled
+        before the provider's minimum-cancel window), `422 PROVIDER_ERROR`
+        (the provider cancel call failed — the order stays `ACTIVE`, so it is
+        safe to retry), and `429 RATE_LIMIT_EXCEEDED` (the daily cancel cap).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1OrderIdRequest'
+            examples:
+              cancel:
+                value:
+                  id: 90210
+      responses:
+        '200':
+          description: The cancellation result, with the refund applied.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1CancelOrderResult'
+              examples:
+                canceled:
+                  value:
+                    success: true
+                    data:
+                      order_id: 90210
+                      status: CANCELED
+                      refund_amount: 750000
+                      new_balance: 2000000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/finish:
+    post:
+      tags: [v1]
+      operationId: v1FinishOrder
+      summary: Finish an order
+      description: >-
+        Mark an order as finished (the verification code has been used). Errors:
+        `404 NOT_FOUND` (no such order) and `409 CONFLICT` (the order is not in
+        a finishable state).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1OrderIdRequest'
+            examples:
+              finish:
+                value:
+                  id: 90210
+      responses:
+        '200':
+          description: The finish result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1FinishOrderResult'
+              examples:
+                finished:
+                  value:
+                    success: true
+                    data:
+                      order_id: 90210
+                      status: COMPLETED
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/resend:
+    post:
+      tags: [v1]
+      operationId: v1ResendOrder
+      summary: Resend the SMS
+      description: >-
+        Ask the provider to resend the verification SMS for an order. Errors:
+        `404 NOT_FOUND` (no such order) and `409 CONFLICT` (the order is not in
+        a state that allows a resend).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1OrderIdRequest'
+            examples:
+              resend:
+                value:
+                  id: 90210
+      responses:
+        '200':
+          description: The resend result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1ResendResult'
+              examples:
+                resent:
+                  value:
+                    success: true
+                    data:
+                      order_id: 90210
+                      status: ACTIVE
+                      resent: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  # ───────────────────────── /v2 — USD-native ─────────────────────────
+  /v2/catalog/countries:
+    get:
+      tags: [v2]
+      operationId: v2ListCountries
+      summary: List countries
+      description: >-
+        List every country in the catalog. Identical to `GET
+        /v1/catalog/countries` — countries carry no money, so there is no
+        `meta.fx` on this response.
+      responses:
+        '200':
+          description: The full list of countries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Country'
+              examples:
+                countries:
+                  value:
+                    success: true
+                    data:
+                      - id: 7
+                        code: id
+                        name: Indonesia
+                        dial_code: '62'
+                        emoji: 🇮🇩
+                        active: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/catalog/services:
+    get:
+      tags: [v2]
+      operationId: v2ListServices
+      summary: List services
+      description: >-
+        List services (platforms). Identical to `GET /v1/catalog/services` —
+        no money, so no `meta.fx`. Pass `country_id` to narrow the list.
+      parameters:
+        - $ref: '#/components/parameters/CountryIdQuery'
+      responses:
+        '200':
+          description: The list of services.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Service'
+              examples:
+                services:
+                  value:
+                    success: true
+                    data:
+                      - id: 1
+                        code: whatsapp
+                        name: WhatsApp
+                        active: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/catalog/products:
+    get:
+      tags: [v2]
+      operationId: v2ListProducts
+      summary: List products
+      description: >-
+        List orderable products with each IDR `price` projected to a USD money
+        object (4-decimal precision). The response `meta` carries pagination
+        **and** an `fx` rate receipt — the same rate used for every `price` in
+        the page. Not cached, so the embedded rate is never stale. Returns
+        `503 FX_RATE_UNAVAILABLE` if the USD/IDR rate cannot be sourced.
+      parameters:
+        - $ref: '#/components/parameters/CountryIdQuery'
+        - $ref: '#/components/parameters/PlatformIdQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/SortQuery'
+      responses:
+        '200':
+          description: A page of products with pagination + FX metadata.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V2Product'
+                      meta:
+                        $ref: '#/components/schemas/V2ProductsMeta'
+              examples:
+                products:
+                  value:
+                    success: true
+                    data:
+                      - id: 1024
+                        name: WhatsApp Indonesia
+                        country_id: 7
+                        platform_id: 1
+                        available: 142
+                        price:
+                          amount: '46.8750'
+                          currency: USD
+                          canonical_amount: 750000
+                          canonical_currency: IDR
+                        active: true
+                        catalog_product_id: 88
+                    meta:
+                      page: 1
+                      limit: 1000
+                      count: 1
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/catalog/exchange-rate:
+    get:
+      tags: [v2]
+      operationId: v2GetExchangeRate
+      summary: Get the USD/IDR exchange rate
+      description: >-
+        Return the current USD/IDR FX receipt — the bare rate object used for
+        every `/v2` money projection. The pair is always `USD/IDR` by
+        contract; any `pair` query parameter is accepted for symmetry with
+        `/v1` but ignored. Returns `503 FX_RATE_UNAVAILABLE` if the rate cannot
+        be sourced.
+      parameters:
+        - $ref: '#/components/parameters/PairQuery'
+      responses:
+        '200':
+          description: The current USD/IDR FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2Fx'
+              examples:
+                fx:
+                  value:
+                    success: true
+                    data:
+                      pair: USD/IDR
+                      rate: 16000
+                      rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/balance:
+    get:
+      tags: [v2]
+      operationId: v2GetBalance
+      summary: Get account balance
+      description: >-
+        Return the authenticated account's balance as a USD money object
+        (2-decimal precision) over the canonical IDR ledger, with an `meta.fx`
+        rate receipt. Returns `503 FX_RATE_UNAVAILABLE` if the USD/IDR rate
+        cannot be sourced.
+      responses:
+        '200':
+          description: The current balance, USD-projected, with an FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2Balance'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                balance:
+                  value:
+                    success: true
+                    data:
+                      balance:
+                        amount: '78.13'
+                        currency: USD
+                        canonical_amount: 1250000
+                        canonical_currency: IDR
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders:
+    get:
+      tags: [v2]
+      operationId: v2ListOrders
+      summary: List orders
+      description: >-
+        List the account's orders, most recent first, with each IDR `amount`
+        projected to a USD money object (4-decimal precision). The response
+        `meta` carries an `fx` rate receipt — the same rate used for every
+        `amount`. Returns `503 FX_RATE_UNAVAILABLE` if the USD/IDR rate cannot
+        be sourced.
+      parameters:
+        - $ref: '#/components/parameters/OrderLimitQuery'
+        - $ref: '#/components/parameters/OrderOffsetQuery'
+        - $ref: '#/components/parameters/OrderStatusQuery'
+      responses:
+        '200':
+          description: The list of orders, USD-projected, with an FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V2OrderSummary'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                orders:
+                  value:
+                    success: true
+                    data:
+                      - id: 90210
+                        status: ACTIVE
+                        created_at: '2026-05-11T09:00:00+00:00'
+                        product_id: 1024
+                        catalog_product_id: 88
+                        phone_number: '+6281234567890'
+                        amount:
+                          amount: '46.8750'
+                          currency: USD
+                          canonical_amount: 750000
+                          canonical_currency: IDR
+                        otp_code: null
+                        otp_received_at: null
+                        expires_at: '2026-05-11T09:20:00+00:00'
+                        canceled_at: null
+                        failed_reason: null
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/active:
+    get:
+      tags: [v2]
+      operationId: v2ListActiveOrders
+      summary: List active orders
+      description: >-
+        List the account's active orders (`ACTIVE` and `OTP_RECEIVED`).
+        Identical to `GET /v1/orders/active` — active orders carry no money, so
+        there is no money object and no `meta.fx` on this response.
+      responses:
+        '200':
+          description: The list of active orders.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1OrderStatus'
+              examples:
+                active:
+                  value:
+                    success: true
+                    data:
+                      - id: 90210
+                        status: OTP_RECEIVED
+                        otp_code: '123456'
+                        otp_message: 'Your code is 123456'
+                        otp_received_at: '2026-05-11T09:01:30+00:00'
+                        expires_at: '2026-05-11T09:20:00+00:00'
+                        failed_reason: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/{id}:
+    get:
+      tags: [v2]
+      operationId: v2GetOrder
+      summary: Get an order
+      description: >-
+        Fetch a single order by id, scoped to the account, with `amount`
+        projected to a USD money object (4-decimal precision) and an `meta.fx`
+        receipt. Returns `404 NOT_FOUND` if the order does not exist or belongs
+        to another account, or `503 FX_RATE_UNAVAILABLE` if the USD/IDR rate
+        cannot be sourced.
+      parameters:
+        - $ref: '#/components/parameters/OrderIdPath'
+      responses:
+        '200':
+          description: The requested order, USD-projected, with an FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2OrderSummary'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                order:
+                  value:
+                    success: true
+                    data:
+                      id: 90210
+                      status: COMPLETED
+                      created_at: '2026-05-11T09:00:00+00:00'
+                      product_id: 1024
+                      catalog_product_id: 88
+                      phone_number: '+6281234567890'
+                      amount:
+                        amount: '46.8750'
+                        currency: USD
+                        canonical_amount: 750000
+                        canonical_currency: IDR
+                      otp_code: '123456'
+                      otp_received_at: '2026-05-11T09:01:30+00:00'
+                      expires_at: '2026-05-11T09:20:00+00:00'
+                      canceled_at: null
+                      failed_reason: null
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/create:
+    post:
+      tags: [v2]
+      operationId: v2CreateOrder
+      summary: Create an order
+      description: >-
+        Rent one or more numbers (USD-native). Identical to
+        `POST /v1/orders/create` except `max_price` is a **USD decimal string**
+        (floor-converted to IDR at the boundary). Provide **exactly one** of
+        `product_id` or `catalog_product_id`. Each created order's `amount` is a
+        USD money object (4-decimal) and the response carries an `meta.fx`
+        receipt.
+
+
+        Idempotent — send an `idempotency-key` header to make retries safe.
+        Errors: `422 VALIDATION_ERROR` (bad/missing parameters),
+        `422 NO_OFFER_AVAILABLE` (no offer matches the product and policy),
+        `422 PROVIDER_ERROR` (an upstream provider rejected the order),
+        `422 IDEMPOTENCY_KEY_REUSED` (key reused with a different body),
+        `409 INSUFFICIENT_BALANCE` (balance too low),
+        `409 REQUEST_IN_PROGRESS` (a request with this key is still settling),
+        and `503 FX_RATE_UNAVAILABLE` (the USD/IDR rate cannot be sourced —
+        resolved before the ledger is touched, so no debit occurs).
+        Abuse-guard throttling surfaces as `429 TEMP_BANNED_ABUSE_GUARD`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V2CreateOrderRequest'
+            examples:
+              routed:
+                summary: Routed order by catalog product (USD price guard)
+                value:
+                  catalog_product_id: 88
+                  max_price: '0.50'
+                  policy: cheapest
+                  quantity: 1
+              legacy:
+                summary: Legacy order by product id
+                value:
+                  product_id: 1024
+                  quantity: 1
+      responses:
+        '200':
+          description: The created order(s), USD-projected, with an FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2CreateOrderResult'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                created:
+                  value:
+                    success: true
+                    data:
+                      orders:
+                        - id: 90210
+                          status: ACTIVE
+                          phone_number: '+6281234567890'
+                          otp_code: null
+                          otp_received_at: null
+                          expires_at: '2026-05-11T09:20:00+00:00'
+                          failed_reason: null
+                          product_id: 1024
+                          catalog_product_id: 88
+                          amount:
+                            amount: '46.8750'
+                            currency: USD
+                            canonical_amount: 750000
+                            canonical_currency: IDR
+                      failed_count: 0
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/cancel:
+    post:
+      tags: [v2]
+      operationId: v2CancelOrder
+      summary: Cancel an order
+      description: >-
+        Cancel an `ACTIVE` order and refund its amount. Reuses the same refund
+        logic as `/v1`; only the result is re-expressed as USD money. The two
+        money fields use DIFFERENT precision by design — `refund_amount` is
+        4-decimal (mirrors the order amount) and `new_balance` is 2-decimal (a
+        wallet total) — both under one `meta.fx`. Errors: `404 NOT_FOUND`
+        (no such order, or it belongs to another account), `409` carrying
+        `CONFLICT` (the order is not in a cancelable state / an OTP has already
+        been received) or `CANCEL_TOO_EARLY` (canceled before the provider's
+        minimum-cancel window), `422 PROVIDER_ERROR` (the provider cancel call
+        failed — the order stays `ACTIVE`, so it is safe to retry),
+        `429 RATE_LIMIT_EXCEEDED` (the daily cancel cap), and
+        `503 FX_RATE_UNAVAILABLE` (the USD/IDR rate cannot be sourced —
+        resolved before the ledger is touched, so no refund occurs).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1OrderIdRequest'
+            examples:
+              cancel:
+                value:
+                  id: 90210
+      responses:
+        '200':
+          description: The cancellation result, USD-projected, with an FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2CancelResult'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                canceled:
+                  value:
+                    success: true
+                    data:
+                      order_id: 90210
+                      status: CANCELED
+                      refund_amount:
+                        amount: '46.8750'
+                        currency: USD
+                        canonical_amount: 750000
+                        canonical_currency: IDR
+                      new_balance:
+                        amount: '125.00'
+                        currency: USD
+                        canonical_amount: 2000000
+                        canonical_currency: IDR
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/finish:
+    post:
+      tags: [v2]
+      operationId: v2FinishOrder
+      summary: Finish an order
+      description: >-
+        Mark an order as finished. Identical to `POST /v1/orders/finish` — no
+        money, so no money object and no `meta.fx`. Errors: `404 NOT_FOUND`
+        (no such order) and `409 CONFLICT` (not finishable).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1OrderIdRequest'
+            examples:
+              finish:
+                value:
+                  id: 90210
+      responses:
+        '200':
+          description: The finish result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1FinishOrderResult'
+              examples:
+                finished:
+                  value:
+                    success: true
+                    data:
+                      order_id: 90210
+                      status: COMPLETED
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/resend:
+    post:
+      tags: [v2]
+      operationId: v2ResendOrder
+      summary: Resend the SMS
+      description: >-
+        Ask the provider to resend the verification SMS. Identical to
+        `POST /v1/orders/resend` — no money, so no money object and no
+        `meta.fx`. Errors: `404 NOT_FOUND` (no such order) and `409 CONFLICT`
+        (the order is not in a state that allows a resend).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1OrderIdRequest'
+            examples:
+              resend:
+                value:
+                  id: 90210
+      responses:
+        '200':
+          description: The resend result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1ResendResult'
+              examples:
+                resent:
+                  value:
+                    success: true
+                    data:
+                      order_id: 90210
+                      status: ACTIVE
+                      resent: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  # ───────────────────── /v1 + /v2 — webhook config ─────────────────────
+  # Webhook config carries NO money, so the /v2 operations reuse the v1
+  # handlers verbatim — responses are byte-identical (no `meta`, no `fx`).
+  /v1/webhook:
+    get:
+      tags: [v1]
+      operationId: v1GetWebhook
+      summary: Get the webhook configuration
+      description: >-
+        Return the saved outbound-webhook configuration for your account: the
+        delivery `webhook_url`, the signing `webhook_secret`, and the
+        auto-disable status (`webhook_disabled_at`, `webhook_disabled_reason`,
+        `webhook_consecutive_failures`).
+
+
+        **Note:** this endpoint returns the `webhook_secret` value in clear text
+        so you can re-verify your local signature check. Treat the response as
+        sensitive and keep it server-side.
+      responses:
+        '200':
+          description: The current webhook configuration.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookConfig'
+              examples:
+                configured:
+                  value:
+                    success: true
+                    data:
+                      webhook_url: https://example.com/hooks/smscode
+                      webhook_secret: 3f8a1c4e9b2d7a6f0c5e1d8b4a7f2e9c3b6d0a5f8e1c4b7d2a9f6e3c0b5d8a1f
+                      webhook_disabled_at: null
+                      webhook_disabled_reason: null
+                      webhook_consecutive_failures: 0
+                unset:
+                  summary: No webhook configured
+                  value:
+                    success: true
+                    data:
+                      webhook_url: null
+                      webhook_secret: null
+                      webhook_disabled_at: null
+                      webhook_disabled_reason: null
+                      webhook_consecutive_failures: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags: [v1]
+      operationId: v1UpdateWebhook
+      summary: Update the webhook configuration
+      description: >-
+        Set or clear your outbound-webhook delivery URL and/or signing secret.
+        Send **at least one** of `webhook_url` or `webhook_secret`; an empty
+        body is rejected with `422 VALIDATION_ERROR`. Pass an empty string (`""`)
+        for a field to clear it. The `webhook_url` must be `https://` and may
+        not resolve to a private/reserved/internal address. On the first time a
+        URL is set without a secret, a signing secret is generated
+        automatically. Any successful update also clears the auto-disable state
+        (re-enabling delivery and resetting the failure counter).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookBody'
+            examples:
+              set_url:
+                summary: Set the delivery URL
+                value:
+                  webhook_url: https://example.com/hooks/smscode
+              rotate_secret:
+                summary: Rotate the signing secret
+                value:
+                  webhook_secret: a-new-shared-secret
+              clear:
+                summary: Clear the webhook (disable delivery)
+                value:
+                  webhook_url: ''
+      responses:
+        '200':
+          description: The updated webhook configuration.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookConfig'
+              examples:
+                updated:
+                  value:
+                    success: true
+                    data:
+                      webhook_url: https://example.com/hooks/smscode
+                      webhook_secret: 3f8a1c4e9b2d7a6f0c5e1d8b4a7f2e9c3b6d0a5f8e1c4b7d2a9f6e3c0b5d8a1f
+                      webhook_disabled_at: null
+                      webhook_disabled_reason: null
+                      webhook_consecutive_failures: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/webhook/test:
+    post:
+      tags: [v1]
+      operationId: v1TestWebhook
+      summary: Send a test webhook event
+      description: >-
+        POST a `webhook.test` event to your configured `webhook_url` and return
+        the HTTP status code your endpoint responded with. Useful to verify
+        connectivity and your signature check end-to-end. Requires a configured
+        URL — otherwise `422 VALIDATION_ERROR`. This is heavily rate limited.
+        If a `webhook_secret` is set, the test request carries an
+        `X-Webhook-Signature` header (see the `webhook.test` callback below).
+      responses:
+        '200':
+          description: >-
+            The test event was dispatched. `status_code` is the HTTP status your
+            endpoint returned (any value, not just 2xx — it is reported as-is).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookTestResult'
+              examples:
+                delivered:
+                  value:
+                    success: true
+                    data:
+                      status_code: 200
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/webhook:
+    get:
+      tags: [v2]
+      operationId: v2GetWebhook
+      summary: Get the webhook configuration
+      description: >-
+        USD-native surface alias of `GET /v1/webhook`. Webhook config carries no
+        money, so the response is byte-identical to the v1 endpoint (no `meta`).
+        See `GET /v1/webhook` for the full field semantics and the secret-in-clear
+        note.
+      responses:
+        '200':
+          description: The current webhook configuration.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookConfig'
+              examples:
+                configured:
+                  value:
+                    success: true
+                    data:
+                      webhook_url: https://example.com/hooks/smscode
+                      webhook_secret: 3f8a1c4e9b2d7a6f0c5e1d8b4a7f2e9c3b6d0a5f8e1c4b7d2a9f6e3c0b5d8a1f
+                      webhook_disabled_at: null
+                      webhook_disabled_reason: null
+                      webhook_consecutive_failures: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags: [v2]
+      operationId: v2UpdateWebhook
+      summary: Update the webhook configuration
+      description: >-
+        USD-native surface alias of `PATCH /v1/webhook` — identical request and
+        response (no money, no `meta`). Send at least one of `webhook_url` or
+        `webhook_secret`. See `PATCH /v1/webhook` for the full semantics.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookBody'
+            examples:
+              set_url:
+                summary: Set the delivery URL
+                value:
+                  webhook_url: https://example.com/hooks/smscode
+      responses:
+        '200':
+          description: The updated webhook configuration.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookConfig'
+              examples:
+                updated:
+                  value:
+                    success: true
+                    data:
+                      webhook_url: https://example.com/hooks/smscode
+                      webhook_secret: 3f8a1c4e9b2d7a6f0c5e1d8b4a7f2e9c3b6d0a5f8e1c4b7d2a9f6e3c0b5d8a1f
+                      webhook_disabled_at: null
+                      webhook_disabled_reason: null
+                      webhook_consecutive_failures: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/webhook/test:
+    post:
+      tags: [v2]
+      operationId: v2TestWebhook
+      summary: Send a test webhook event
+      description: >-
+        USD-native surface alias of `POST /v1/webhook/test` — identical behavior.
+        POSTs a `webhook.test` event to your configured URL and returns the HTTP
+        status your endpoint responded with. Shares the same per-account outbound
+        rate budget as the v1 test endpoint.
+      responses:
+        '200':
+          description: >-
+            The test event was dispatched. `status_code` is the HTTP status your
+            endpoint returned, reported as-is.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookTestResult'
+              examples:
+                delivered:
+                  value:
+                    success: true
+                    data:
+                      status_code: 200
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+# ─────────────────────────── outbound webhooks ───────────────────────────
+# OpenAPI 3.1 `webhooks:` — the requests SMSCode makes OUT to YOUR server
+# (the configured `webhook_url`), not endpoints you call on us. Each is an
+# HTTP POST your endpoint must accept and answer 2xx; a non-2xx (or transport
+# failure) is retried, and 10 consecutive failures auto-disable delivery.
+webhooks:
+  orderEvent:
+    post:
+      tags: [v1]
+      operationId: onOrderEvent
+      summary: Order lifecycle event (sent to your endpoint)
+      description: >-
+        Sent to your configured `webhook_url` whenever one of your orders
+        transitions: an OTP arrives (`order.otp_received`) or the order reaches a
+        terminal state (`order.completed`, `order.expired`, `order.canceled`).
+        Authenticated, when a `webhook_secret` is set, with the
+        `X-Webhook-Signature` header — the lowercase-hex `sha256=<hmac>` of the
+        **raw request body** keyed by your secret. Verify the signature, then
+        respond `2xx` to acknowledge.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+            examples:
+              otp_received:
+                summary: order.otp_received
+                value:
+                  event: order.otp_received
+                  timestamp: '2026-05-11T09:05:00+00:00'
+                  data:
+                    order_id: 90210
+                    phone_number: '+6281234567890'
+                    otp_code: '123456'
+                    otp_message: 'Your code is 123456'
+                    product_id: 1024
+                    catalog_product_id: 88
+                    country: Indonesia
+                    platform: WhatsApp
+              completed:
+                summary: order.completed
+                value:
+                  event: order.completed
+                  timestamp: '2026-05-11T09:10:00+00:00'
+                  data:
+                    order_id: 90210
+                    phone_number: '+6281234567890'
+                    otp_code: '123456'
+                    otp_message: 'Your code is 123456'
+                    product_id: 1024
+                    catalog_product_id: 88
+                    country: Indonesia
+                    platform: WhatsApp
+              canceled:
+                summary: order.canceled
+                value:
+                  event: order.canceled
+                  timestamp: '2026-05-11T09:08:00+00:00'
+                  data:
+                    order_id: 90210
+                    phone_number: '+6281234567890'
+                    otp_code: null
+                    otp_message: null
+                    product_id: 1024
+                    catalog_product_id: 88
+                    country: Indonesia
+                    platform: WhatsApp
+      responses:
+        '200':
+          description: >-
+            Acknowledged. Return any `2xx` to mark the delivery successful. A
+            non-2xx response (or a transport failure) is retried with backoff.
+
+  webhookTest:
+    post:
+      tags: [v1]
+      operationId: onWebhookTest
+      summary: Test event (sent by POST /webhook/test)
+      description: >-
+        Sent to your configured `webhook_url` when you call `POST /webhook/test`.
+        Signed identically to `orderEvent` (the `X-Webhook-Signature` header,
+        present when a `webhook_secret` is set). The status code your endpoint
+        returns is echoed back in the `POST /webhook/test` response.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookTestEvent'
+            examples:
+              test:
+                value:
+                  event: webhook.test
+                  timestamp: '2026-05-11T09:05:00+00:00'
+                  data:
+                    message: 'This is a test webhook event from SMSCode.'
+      responses:
+        '200':
+          description: Acknowledged. Any `2xx` marks the test successful.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        Bearer authentication with your API key. Send it as
+        `Authorization: Bearer <YOUR_API_KEY>`. Keep the key server-side; it
+        carries full balance and ordering authority for your account.
+
+  schemas:
+    ErrorCode:
+      type: string
+      title: ErrorCode
+      description: >-
+        Stable, machine-readable error identifier. Branch on this value rather
+        than on `message`. The HTTP status accompanying each code is fixed (see
+        each value).
+      enum:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - VALIDATION_ERROR
+        - PROVIDER_ERROR
+        - NO_OFFER_AVAILABLE
+        - IDEMPOTENCY_KEY_REUSED
+        - INSUFFICIENT_BALANCE
+        - CONFLICT
+        - CANCEL_TOO_EARLY
+        - REQUEST_IN_PROGRESS
+        - RATE_LIMIT_EXCEEDED
+        - TEMP_BANNED_ABUSE_GUARD
+        - SERVICE_UNAVAILABLE
+        - FX_RATE_UNAVAILABLE
+        - INTERNAL_ERROR
+      x-enum-descriptions:
+        UNAUTHORIZED: Missing or invalid API key (HTTP 401).
+        FORBIDDEN: Authenticated, but not permitted to perform this action (HTTP 403).
+        NOT_FOUND: The requested resource does not exist (HTTP 404).
+        VALIDATION_ERROR: Request failed validation (bad/missing parameters) (HTTP 422).
+        PROVIDER_ERROR: An upstream SMS provider rejected or failed the operation (HTTP 422).
+        NO_OFFER_AVAILABLE: No offer matches the requested product and policy (HTTP 422).
+        IDEMPOTENCY_KEY_REUSED: The idempotency key was already used with a different request body (HTTP 422).
+        INSUFFICIENT_BALANCE: Account balance is too low for this operation (HTTP 409).
+        CONFLICT: The request conflicts with the current state of the resource (HTTP 409).
+        CANCEL_TOO_EARLY: The order was canceled before the provider's minimum-cancel window elapsed; wait and retry (HTTP 409).
+        REQUEST_IN_PROGRESS: A request with this idempotency key is still in progress; retry the same key shortly (HTTP 409).
+        RATE_LIMIT_EXCEEDED: Too many requests; back off and retry after the `Retry-After` header (HTTP 429).
+        TEMP_BANNED_ABUSE_GUARD: Order creation temporarily blocked by the abuse guard due to a high failure rate; see `details` and `Retry-After` (HTTP 429).
+        SERVICE_UNAVAILABLE: The service is temporarily unavailable; retry later (HTTP 503).
+        FX_RATE_UNAVAILABLE: The USD/IDR exchange rate is temporarily unavailable; retry later (HTTP 503).
+        INTERNAL_ERROR: An unexpected server error occurred (HTTP 500).
+
+    ErrorObject:
+      type: object
+      title: ErrorObject
+      description: The error payload carried inside a failure envelope.
+      required:
+        - code
+        - message
+      additionalProperties: false
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          description: >-
+            Human-readable description of the error. For display and logging
+            only — do not branch on this text; use `code` instead.
+          examples:
+            - Authentication required
+        details:
+          type: object
+          additionalProperties: true
+          description: >-
+            Optional structured context for the error (e.g. validation field
+            errors, or `until`/`tier`/`retry_after_seconds` for
+            `TEMP_BANNED_ABUSE_GUARD`). Omitted when there is no extra context —
+            never sent as `null`.
+
+    ErrorResponse:
+      type: object
+      title: ErrorResponse
+      description: >-
+        The failure envelope returned for every logical/business error. The
+        `success` discriminator is always `false`.
+      required:
+        - success
+        - error
+      additionalProperties: false
+      properties:
+        success:
+          const: false
+          description: Always `false` for an error response.
+        error:
+          $ref: '#/components/schemas/ErrorObject'
+      examples:
+        - success: false
+          error:
+            code: UNAUTHORIZED
+            message: Authentication required
+
+    SuccessEnvelope:
+      type: object
+      title: SuccessEnvelope
+      description: >-
+        The success envelope shape. `data` carries the operation result;
+        `meta` is optional and present only when an endpoint attaches it (e.g.
+        pagination, or the `meta.fx` exchange-rate receipt on `/v2`). Concrete
+        endpoints narrow `data` (and `meta`) with `allOf` in later additions to
+        this spec.
+      required:
+        - success
+        - data
+      properties:
+        success:
+          const: true
+          description: Always `true` for a success response.
+        data:
+          description: The operation result payload. Shape depends on the endpoint.
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    Meta:
+      type: object
+      title: Meta
+      description: >-
+        Optional response metadata envelope. Endpoints attach only the members
+        relevant to them (e.g. pagination on list endpoints, or `fx` on `/v2`
+        money responses). Omitted entirely when there is nothing to report.
+      additionalProperties: true
+
+    # ── /v1 catalog + balance schemas (IDR-native) ──
+
+    V1Country:
+      type: object
+      title: V1Country
+      description: A country in the catalog.
+      required: [id, name, active]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable country identifier. Use it to scope services and products.
+          examples: [6]
+        code:
+          type: [string, 'null']
+          description: ISO 3166-1 alpha-2 country code (lowercase), when known.
+          examples: [id]
+        name:
+          type: string
+          description: Human-readable country name.
+          examples: [Indonesia]
+        dial_code:
+          type: [string, 'null']
+          description: International dialing code (without the leading `+`), when known.
+          examples: ['62']
+        emoji:
+          type: [string, 'null']
+          description: Flag emoji for the country, when known.
+          examples: ['🇮🇩']
+        active:
+          type: boolean
+          description: Whether the country is currently active in the catalog.
+          examples: [true]
+
+    V1Service:
+      type: object
+      title: V1Service
+      description: A service (platform) you can rent a number for, e.g. WhatsApp.
+      required: [id, code, name, active]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable service identifier (the `platform_id` used by products).
+          examples: [1]
+        code:
+          type: string
+          description: Machine-readable service slug.
+          examples: [whatsapp]
+        name:
+          type: string
+          description: Human-readable service name.
+          examples: [WhatsApp]
+        active:
+          type: boolean
+          description: Whether the service is currently active in the catalog.
+          examples: [true]
+
+    V1Product:
+      type: object
+      title: V1Product
+      description: >-
+        An orderable product — a service in a country at a price. `price` is in
+        **IDR** minor units (integer), the canonical ledger currency.
+      required: [id, available, price, active]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable product identifier. Pass it to the order-create endpoint.
+          examples: [1024]
+        name:
+          type: [string, 'null']
+          description: Human-readable product name, when set.
+          examples: [WhatsApp Indonesia]
+        country_id:
+          type: [integer, 'null']
+          format: int32
+          description: The country this product belongs to (`V1Country.id`).
+          examples: [6]
+        platform_id:
+          type: [integer, 'null']
+          format: int32
+          description: The service this product belongs to (`V1Service.id`).
+          examples: [1]
+        available:
+          type: integer
+          format: int32
+          description: Approximate number of numbers currently available to rent.
+          examples: [142]
+        price:
+          type: integer
+          format: int64
+          description: Price per order in **IDR** minor units (integer).
+          examples: [750000]
+        active:
+          type: boolean
+          description: Whether the product is currently orderable.
+          examples: [true]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: Identifier of the underlying catalog product, when linked.
+          examples: [88]
+
+    V1ExchangeRate:
+      type: object
+      title: V1ExchangeRate
+      description: A stored exchange rate for a currency pair.
+      required: [pair, base_currency, quote_currency, rate]
+      additionalProperties: false
+      properties:
+        pair:
+          type: string
+          description: The currency pair, formatted `BASE/QUOTE`.
+          examples: [USD/IDR]
+        base_currency:
+          type: string
+          description: ISO 4217 base currency code.
+          examples: [USD]
+        quote_currency:
+          type: string
+          description: ISO 4217 quote currency code.
+          examples: [IDR]
+        rate:
+          type: integer
+          format: int64
+          description: >-
+            The rate as `quote_per_base` — quote-currency minor units per one
+            base unit (integer).
+          examples: [16000]
+
+    V1Balance:
+      type: object
+      title: V1Balance
+      description: The authenticated account's balance, in IDR.
+      required: [currency, balance]
+      additionalProperties: false
+      properties:
+        currency:
+          type: string
+          const: IDR
+          description: Always `IDR` on `/v1` — the canonical ledger currency.
+        balance:
+          type: integer
+          format: int64
+          description: The balance in **IDR** minor units (integer).
+          examples: [1250000]
+
+    PaginationMeta:
+      type: object
+      title: PaginationMeta
+      description: Pagination metadata for a `/v1` list response.
+      required: [page, limit, count]
+      additionalProperties: false
+      properties:
+        page:
+          type: integer
+          format: int64
+          description: The 1-based page number returned.
+          examples: [1]
+        limit:
+          type: integer
+          format: int64
+          description: The maximum number of items per page applied to this response.
+          examples: [1000]
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The number of items actually returned on this page.
+          examples: [1]
+
+    # ── /v2 money + catalog + balance schemas (USD-native) ──
+
+    V2Money:
+      type: object
+      title: V2Money
+      description: >-
+        A single money value, expressed in USD with the canonical IDR truth
+        carried alongside. `amount` is a decimal string (never a float, to
+        avoid precision loss); the canonical fields are the exact IDR minor
+        units the USD value was projected from.
+      required: [amount, currency, canonical_amount, canonical_currency]
+      additionalProperties: false
+      properties:
+        amount:
+          type: string
+          description: >-
+            The USD amount as a decimal string. Balance/total values use 2
+            decimal places; product-derived prices use 4. Parse as a decimal,
+            not a float.
+          examples: ['78.13']
+        currency:
+          type: string
+          const: USD
+          description: Always `USD` for a `/v2` money value.
+        canonical_amount:
+          type: integer
+          format: int64
+          description: The canonical amount in **IDR** minor units (integer) — the ledger truth.
+          examples: [1250000]
+        canonical_currency:
+          type: string
+          const: IDR
+          description: Always `IDR` — the canonical ledger currency.
+
+    V2Fx:
+      type: object
+      title: V2Fx
+      description: >-
+        The per-response FX receipt — the USD/IDR rate used to project every
+        money value in the response.
+      required: [pair, rate, rate_as_of]
+      additionalProperties: false
+      properties:
+        pair:
+          type: string
+          const: USD/IDR
+          description: Always `USD/IDR`.
+        rate:
+          type: integer
+          format: int64
+          description: >-
+            The USD/IDR rate as `quote_per_base` — IDR minor units per one USD
+            (integer).
+          examples: [16000]
+        rate_as_of:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            RFC 3339 timestamp of when the rate was sourced, or `null` if not
+            recorded.
+          examples: ['2026-05-11T09:00:00+00:00']
+
+    V2Meta:
+      type: object
+      title: V2Meta
+      description: The `meta` envelope for a `/v2` money response — carries the FX receipt.
+      required: [fx]
+      additionalProperties: false
+      properties:
+        fx:
+          $ref: '#/components/schemas/V2Fx'
+
+    V2Product:
+      type: object
+      title: V2Product
+      description: >-
+        Like `V1Product`, but the IDR `price` is projected to a USD money
+        object (4-decimal precision). All other fields are identical.
+      required: [id, available, price, active]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable product identifier. Pass it to the order-create endpoint.
+          examples: [1024]
+        name:
+          type: [string, 'null']
+          description: Human-readable product name, when set.
+          examples: [WhatsApp Indonesia]
+        country_id:
+          type: [integer, 'null']
+          format: int32
+          description: The country this product belongs to (`V1Country.id`).
+          examples: [6]
+        platform_id:
+          type: [integer, 'null']
+          format: int32
+          description: The service this product belongs to (`V1Service.id`).
+          examples: [1]
+        available:
+          type: integer
+          format: int32
+          description: Approximate number of numbers currently available to rent.
+          examples: [142]
+        price:
+          $ref: '#/components/schemas/V2Money'
+        active:
+          type: boolean
+          description: Whether the product is currently orderable.
+          examples: [true]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: Identifier of the underlying catalog product, when linked.
+          examples: [88]
+
+    V2ProductsMeta:
+      type: object
+      title: V2ProductsMeta
+      description: >-
+        The `meta` for a `/v2` products response — flat pagination plus the FX
+        receipt used for every projected `price` in the page.
+      required: [page, limit, count, fx]
+      additionalProperties: false
+      properties:
+        page:
+          type: integer
+          format: int64
+          description: The 1-based page number returned.
+          examples: [1]
+        limit:
+          type: integer
+          format: int64
+          description: The maximum number of items per page applied to this response.
+          examples: [1000]
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The number of items actually returned on this page.
+          examples: [1]
+        fx:
+          $ref: '#/components/schemas/V2Fx'
+
+    V2Balance:
+      type: object
+      title: V2Balance
+      description: The authenticated account's balance, USD-projected over the IDR ledger.
+      required: [balance]
+      additionalProperties: false
+      properties:
+        balance:
+          $ref: '#/components/schemas/V2Money'
+
+    # ── /v1 order schemas (IDR-native) ──
+
+    OrderStatusEnum:
+      type: string
+      title: OrderStatusEnum
+      description: The lifecycle status of an order.
+      enum:
+        - ACTIVE
+        - OTP_RECEIVED
+        - COMPLETED
+        - CANCELED
+        - EXPIRED
+      x-enum-descriptions:
+        ACTIVE: A number is rented and waiting for an inbound SMS.
+        OTP_RECEIVED: The verification SMS arrived; the code is available.
+        COMPLETED: The order was finished and the SMS code consumed.
+        CANCELED: The order was canceled and (if eligible) refunded.
+        EXPIRED: The rental window elapsed without a usable SMS.
+
+    OrderPolicy:
+      type: string
+      title: OrderPolicy
+      description: >-
+        Offer-ranking policy for the routed (`catalog_product_id`) order path.
+        Defaults to `cheapest` when omitted.
+      enum:
+        - cheapest
+        - best_success
+      x-enum-descriptions:
+        cheapest: Pick the lowest-priced matching offer.
+        best_success: Pick the offer with the best recent success rate.
+
+    V1OrderSummary:
+      type: object
+      title: V1OrderSummary
+      description: >-
+        A single order as returned by the list and get-by-id endpoints.
+        `amount` is the charged price in **IDR** minor units (integer).
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable order identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        created_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the order was created, when recorded.
+          examples: ['2026-05-11T09:00:00+00:00']
+        product_id:
+          type: integer
+          format: int32
+          description: >-
+            The product/tier the order was placed against — the selected tier on
+            a routed order, or the requested tier on a legacy order.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            The stable catalog product the order belongs to, when linked
+            (`null` for older orders predating catalog backfill).
+          examples: [88]
+        phone_number:
+          type: [string, 'null']
+          description: The rented phone number, once assigned.
+          examples: ['+6281234567890']
+        amount:
+          type: integer
+          format: int64
+          description: The charged price in **IDR** minor units (integer).
+          examples: [750000]
+        otp_code:
+          type: [string, 'null']
+          description: The received verification code, when an SMS has arrived.
+          examples: ['123456']
+        otp_received_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the verification SMS was received.
+          examples: ['2026-05-11T09:01:30+00:00']
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the rental window expires.
+          examples: ['2026-05-11T09:20:00+00:00']
+        canceled_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the order was canceled, when applicable.
+          examples: ['2026-05-11T09:05:00+00:00']
+        failed_reason:
+          type: [string, 'null']
+          description: A short machine/human reason when the order failed, when applicable.
+          examples: ['NoNumbers']
+        can_finish:
+          type: boolean
+          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+        can_resend:
+          type: boolean
+          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+        can_cancel:
+          type: boolean
+          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+        can_replace:
+          type: boolean
+          description: "Server-authoritative: replace allowed (== can_cancel)."
+        resend_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When resend leaves cooldown; null when not in cooldown."
+        cancel_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When the min-cancel window clears; null when already clear or evidence exists."
+        replace_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "== cancel_available_at."
+
+    V1OrderStatus:
+      type: object
+      title: V1OrderStatus
+      description: >-
+        A compact, money-free order status as returned by the active-orders
+        endpoint (status and OTP fields only — no `amount`).
+      required: [id, status, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable order identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        otp_code:
+          type: [string, 'null']
+          description: The received verification code, when an SMS has arrived.
+          examples: ['123456']
+        otp_message:
+          type: [string, 'null']
+          description: The full received SMS message body, when available.
+          examples: ['Your code is 123456']
+        otp_received_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the verification SMS was received.
+          examples: ['2026-05-11T09:01:30+00:00']
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the rental window expires.
+          examples: ['2026-05-11T09:20:00+00:00']
+        failed_reason:
+          type: [string, 'null']
+          description: A short reason when the order failed, when applicable.
+          examples: ['NoNumbers']
+        can_finish:
+          type: boolean
+          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+        can_resend:
+          type: boolean
+          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+        can_cancel:
+          type: boolean
+          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+        can_replace:
+          type: boolean
+          description: "Server-authoritative: replace allowed (== can_cancel)."
+        resend_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When resend leaves cooldown; null when not in cooldown."
+        cancel_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When the min-cancel window clears; null when already clear or evidence exists."
+        replace_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "== cancel_available_at."
+
+    V1CreateOrderRequest:
+      type: object
+      title: V1CreateOrderRequest
+      description: >-
+        Body for `POST /v1/orders/create`. Provide **exactly one** of
+        `product_id` (legacy direct-tier path) or `catalog_product_id` (routed
+        path — orders the best current offer for the stable catalog id);
+        supplying both, or neither, is rejected with `422 VALIDATION_ERROR`.
+        The routing fields (`max_price`, `prefer_provider`, `policy`) are valid
+        **only** with `catalog_product_id`.
+      additionalProperties: false
+      properties:
+        product_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            Legacy direct-tier path — the exact product to order. Mutually
+            exclusive with `catalog_product_id`.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            Routed path — order the best current offer for this stable catalog
+            id. Mutually exclusive with `product_id`.
+          examples: [88]
+        max_price:
+          type: [integer, 'null']
+          format: int64
+          description: >-
+            Routed-path price guard in **IDR** minor units (integer): skip
+            offers above this price. Valid only with `catalog_product_id`.
+          examples: [800000]
+        prefer_provider:
+          type: [string, 'null']
+          description: >-
+            Routed-path soft provider preference (provider code,
+            case-insensitive). Valid only with `catalog_product_id`.
+          examples: [hero]
+        policy:
+          $ref: '#/components/schemas/OrderPolicy'
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          default: 1
+          description: How many numbers to order in one request (1–100).
+          examples: [1]
+
+    V1CreateOrderItem:
+      type: object
+      title: V1CreateOrderItem
+      description: >-
+        One created order in a `POST /v1/orders/create` result. `amount` is the
+        charged price in **IDR** minor units. On a fresh create the OTP and
+        failure fields are always `null`.
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable order identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        phone_number:
+          type: [string, 'null']
+          description: The rented phone number, once assigned.
+          examples: ['+6281234567890']
+        otp_code:
+          type: [string, 'null']
+          description: Always `null` on a fresh create (no SMS yet).
+        otp_received_at:
+          type: [string, 'null']
+          format: date-time
+          description: Always `null` on a fresh create (no SMS yet).
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the rental window expires.
+          examples: ['2026-05-11T09:20:00+00:00']
+        failed_reason:
+          type: [string, 'null']
+          description: Always `null` on a fresh create.
+        product_id:
+          type: integer
+          format: int32
+          description: The selected (routed) or requested (legacy) tier id for this order.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: The stable catalog id this order belongs to, when linked.
+          examples: [88]
+        amount:
+          type: integer
+          format: int64
+          description: The charged price in **IDR** minor units (integer).
+          examples: [750000]
+        can_finish:
+          type: boolean
+          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+        can_resend:
+          type: boolean
+          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+        can_cancel:
+          type: boolean
+          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+        can_replace:
+          type: boolean
+          description: "Server-authoritative: replace allowed (== can_cancel)."
+        resend_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When resend leaves cooldown; null when not in cooldown."
+        cancel_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When the min-cancel window clears; null when already clear or evidence exists."
+        replace_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "== cancel_available_at."
+
+    V1CreateOrderResult:
+      type: object
+      title: V1CreateOrderResult
+      description: The result of a `POST /v1/orders/create` call.
+      required: [orders, failed_count]
+      additionalProperties: false
+      properties:
+        orders:
+          type: array
+          description: The orders successfully created.
+          items:
+            $ref: '#/components/schemas/V1CreateOrderItem'
+        failed_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: How many requested orders failed to be created.
+          examples: [0]
+
+    V1CancelOrderResult:
+      type: object
+      title: V1CancelOrderResult
+      description: >-
+        The result of a `POST /v1/orders/cancel` call. Money fields are in
+        **IDR** minor units (integer).
+      required: [order_id, status, refund_amount, new_balance]
+      additionalProperties: false
+      properties:
+        order_id:
+          type: integer
+          format: int32
+          description: The canceled order's identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        refund_amount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The amount refunded to the balance, in **IDR** minor units.
+          examples: [750000]
+        new_balance:
+          type: integer
+          format: int64
+          description: The account balance after the refund, in **IDR** minor units.
+          examples: [2000000]
+
+    V1FinishOrderResult:
+      type: object
+      title: V1FinishOrderResult
+      description: The result of a `POST /v1/orders/finish` call.
+      required: [order_id, status]
+      additionalProperties: false
+      properties:
+        order_id:
+          type: integer
+          format: int32
+          description: The finished order's identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+
+    V1ResendResult:
+      type: object
+      title: V1ResendResult
+      description: The result of a `POST /v1/orders/resend` call.
+      required: [order_id, status, resent]
+      additionalProperties: false
+      properties:
+        order_id:
+          type: integer
+          format: int32
+          description: The order's identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        resent:
+          type: boolean
+          description: Whether the resend request was accepted and dispatched.
+          examples: [true]
+
+    # ── /v2 order schemas (USD-native) ──
+
+    V2OrderSummary:
+      type: object
+      title: V2OrderSummary
+      description: >-
+        Like `V1OrderSummary`, but `amount` is projected to a USD money object
+        (4-decimal precision). All other fields are identical.
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable order identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        created_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the order was created, when recorded.
+          examples: ['2026-05-11T09:00:00+00:00']
+        product_id:
+          type: integer
+          format: int32
+          description: The selected (routed) or requested (legacy) tier id for this order.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: The stable catalog id this order belongs to, when linked.
+          examples: [88]
+        phone_number:
+          type: [string, 'null']
+          description: The rented phone number, once assigned.
+          examples: ['+6281234567890']
+        amount:
+          $ref: '#/components/schemas/V2Money'
+        otp_code:
+          type: [string, 'null']
+          description: The received verification code, when an SMS has arrived.
+          examples: ['123456']
+        otp_received_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the verification SMS was received.
+          examples: ['2026-05-11T09:01:30+00:00']
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the rental window expires.
+          examples: ['2026-05-11T09:20:00+00:00']
+        canceled_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the order was canceled, when applicable.
+          examples: ['2026-05-11T09:05:00+00:00']
+        failed_reason:
+          type: [string, 'null']
+          description: A short reason when the order failed, when applicable.
+          examples: ['NoNumbers']
+        can_finish:
+          type: boolean
+          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+        can_resend:
+          type: boolean
+          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+        can_cancel:
+          type: boolean
+          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+        can_replace:
+          type: boolean
+          description: "Server-authoritative: replace allowed (== can_cancel)."
+        resend_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When resend leaves cooldown; null when not in cooldown."
+        cancel_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When the min-cancel window clears; null when already clear or evidence exists."
+        replace_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "== cancel_available_at."
+
+    V2CreateOrderRequest:
+      type: object
+      title: V2CreateOrderRequest
+      description: >-
+        Body for `POST /v2/orders/create`. Identical to `V1CreateOrderRequest`
+        except `max_price` is a **USD decimal string** (floor-converted to IDR
+        at the boundary) instead of an IDR integer. Provide **exactly one** of
+        `product_id` or `catalog_product_id`; the routing fields (`max_price`,
+        `prefer_provider`, `policy`) are valid only with `catalog_product_id`.
+      additionalProperties: false
+      properties:
+        product_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            Legacy direct-tier path — the exact product to order. Mutually
+            exclusive with `catalog_product_id`.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            Routed path — order the best current offer for this stable catalog
+            id. Mutually exclusive with `product_id`.
+          examples: [88]
+        max_price:
+          type: [string, 'null']
+          description: >-
+            Routed-path price guard as a **USD decimal string** (e.g. `"0.50"`),
+            floor-converted to IDR at the boundary. Valid only with
+            `catalog_product_id`. Parse/format as a decimal, never a float.
+          examples: ['0.50']
+        prefer_provider:
+          type: [string, 'null']
+          description: >-
+            Routed-path soft provider preference (provider code,
+            case-insensitive). Valid only with `catalog_product_id`.
+          examples: [hero]
+        policy:
+          $ref: '#/components/schemas/OrderPolicy'
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          default: 1
+          description: How many numbers to order in one request (1–100).
+          examples: [1]
+
+    V2CreateOrderItem:
+      type: object
+      title: V2CreateOrderItem
+      description: >-
+        Like `V1CreateOrderItem`, but `amount` is a USD money object (4-decimal
+        precision). On a fresh create the OTP and failure fields are always
+        `null`.
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Stable order identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        phone_number:
+          type: [string, 'null']
+          description: The rented phone number, once assigned.
+          examples: ['+6281234567890']
+        otp_code:
+          type: [string, 'null']
+          description: Always `null` on a fresh create (no SMS yet).
+        otp_received_at:
+          type: [string, 'null']
+          format: date-time
+          description: Always `null` on a fresh create (no SMS yet).
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 timestamp of when the rental window expires.
+          examples: ['2026-05-11T09:20:00+00:00']
+        failed_reason:
+          type: [string, 'null']
+          description: Always `null` on a fresh create.
+        product_id:
+          type: integer
+          format: int32
+          description: The selected (routed) or requested (legacy) tier id for this order.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: The stable catalog id this order belongs to, when linked.
+          examples: [88]
+        amount:
+          $ref: '#/components/schemas/V2Money'
+        can_finish:
+          type: boolean
+          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+        can_resend:
+          type: boolean
+          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+        can_cancel:
+          type: boolean
+          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+        can_replace:
+          type: boolean
+          description: "Server-authoritative: replace allowed (== can_cancel)."
+        resend_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When resend leaves cooldown; null when not in cooldown."
+        cancel_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When the min-cancel window clears; null when already clear or evidence exists."
+        replace_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "== cancel_available_at."
+
+    V2CreateOrderResult:
+      type: object
+      title: V2CreateOrderResult
+      description: The result of a `POST /v2/orders/create` call.
+      required: [orders, failed_count]
+      additionalProperties: false
+      properties:
+        orders:
+          type: array
+          description: The orders successfully created.
+          items:
+            $ref: '#/components/schemas/V2CreateOrderItem'
+        failed_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: How many requested orders failed to be created.
+          examples: [0]
+
+    V2CancelResult:
+      type: object
+      title: V2CancelResult
+      description: >-
+        The result of a `POST /v2/orders/cancel` call. Both money fields are USD
+        money objects over the IDR ledger, at DIFFERENT precision by design:
+        `refund_amount` mirrors the order amount (4-decimal) and `new_balance`
+        is a wallet total (2-decimal). Mixed precision in one response is
+        intentional and allowed by the `/v2` money contract.
+      required: [order_id, status, refund_amount, new_balance]
+      additionalProperties: false
+      properties:
+        order_id:
+          type: integer
+          format: int32
+          description: The canceled order's identifier.
+          examples: [90210]
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        refund_amount:
+          $ref: '#/components/schemas/V2Money'
+        new_balance:
+          $ref: '#/components/schemas/V2Money'
+
+    V1OrderIdRequest:
+      type: object
+      title: V1OrderIdRequest
+      description: >-
+        Body identifying a single order by id — used by the cancel, finish, and
+        resend endpoints on both `/v1` and `/v2`.
+      required: [id]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: The order identifier to act on.
+          examples: [90210]
+
+    # ── webhook config schemas (/v1 + /v2) ──
+
+    WebhookConfig:
+      type: object
+      title: WebhookConfig
+      description: >-
+        The saved outbound-webhook configuration for an account, returned by
+        `GET`/`PATCH /webhook`. **Security note:** `webhook_secret` is returned
+        in clear text — treat the whole object as sensitive.
+      required:
+        - webhook_url
+        - webhook_secret
+        - webhook_disabled_at
+        - webhook_disabled_reason
+        - webhook_consecutive_failures
+      additionalProperties: false
+      properties:
+        webhook_url:
+          type: [string, 'null']
+          format: uri
+          description: >-
+            The HTTPS URL the platform POSTs events to. `null` when no webhook
+            is configured.
+          examples: ['https://example.com/hooks/smscode']
+        webhook_secret:
+          type: [string, 'null']
+          description: >-
+            The shared secret used to sign deliveries (HMAC-SHA256, sent in the
+            `X-Webhook-Signature` header). `null` when none is set. Returned in
+            clear text.
+          examples: ['3f8a1c4e9b2d7a6f0c5e1d8b4a7f2e9c3b6d0a5f8e1c4b7d2a9f6e3c0b5d8a1f']
+        webhook_disabled_at:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            RFC 3339 timestamp at which delivery was auto-disabled after
+            repeated failures, or `null` if active. Any successful `PATCH`
+            re-enables delivery (clears this back to `null`).
+          examples: [null]
+        webhook_disabled_reason:
+          type: [string, 'null']
+          description: >-
+            Why delivery was auto-disabled (e.g.
+            `consecutive_failed_user_endpoint`), or `null` if active.
+          examples: [null]
+        webhook_consecutive_failures:
+          type: integer
+          format: int32
+          minimum: 0
+          description: >-
+            Count of consecutive failed deliveries. Resets to `0` on a
+            successful delivery or any successful `PATCH`. Delivery is
+            auto-disabled once it reaches 10.
+          examples: [0]
+
+    UpdateWebhookBody:
+      type: object
+      title: UpdateWebhookBody
+      description: >-
+        Body for `PATCH /webhook`. Provide **at least one** field. Pass an empty
+        string (`""`) to clear a field. An empty body is rejected with
+        `422 VALIDATION_ERROR`.
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        webhook_url:
+          type: [string, 'null']
+          maxLength: 2048
+          description: >-
+            The HTTPS delivery URL to set. Must be `https://` and must not
+            resolve to a private/reserved/internal address. Pass an empty string
+            (`""`) to clear it. (No `uri` format hint here precisely because the
+            empty-string clear value is a valid input.)
+          examples: ['https://example.com/hooks/smscode']
+        webhook_secret:
+          type: [string, 'null']
+          description: >-
+            The signing secret to set (max 256 chars). Empty string clears it.
+            When a URL is set for the first time with no secret, one is
+            generated automatically.
+          examples: ['a-new-shared-secret']
+
+    WebhookTestResult:
+      type: object
+      title: WebhookTestResult
+      description: The result of `POST /webhook/test`.
+      required: [status_code]
+      additionalProperties: false
+      properties:
+        status_code:
+          type: integer
+          format: int32
+          description: >-
+            The HTTP status code your endpoint returned to the test POST,
+            reported as-is (any value, not only 2xx).
+          examples: [200]
+
+    # ── outbound webhook event payloads (see the top-level `webhooks:` block) ──
+
+    WebhookEvent:
+      type: object
+      title: WebhookEvent
+      description: >-
+        The JSON body the platform POSTs to your `webhook_url` when an order
+        transitions. When a `webhook_secret` is set, the request carries an
+        `X-Webhook-Signature: sha256=<hex>` header — the lowercase-hex
+        HMAC-SHA256 of the **raw request body** keyed by your secret. Verify it
+        before trusting the payload.
+      required: [event, timestamp, data]
+      additionalProperties: false
+      properties:
+        event:
+          type: string
+          description: The event type.
+          enum:
+            - order.otp_received
+            - order.completed
+            - order.expired
+            - order.canceled
+          x-enum-descriptions:
+            order.otp_received: An OTP/verification code arrived for the order.
+            order.completed: The order was completed.
+            order.expired: The order expired before completion.
+            order.canceled: The order was canceled (and refunded).
+          examples: [order.otp_received]
+        timestamp:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp of when the event was emitted.
+          examples: ['2026-05-11T09:05:00+00:00']
+        data:
+          $ref: '#/components/schemas/WebhookEventData'
+
+    WebhookEventData:
+      type: object
+      title: WebhookEventData
+      description: The order snapshot carried by an order webhook event.
+      required: [order_id, product_id, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      additionalProperties: false
+      properties:
+        order_id:
+          type: integer
+          format: int32
+          description: The order identifier this event concerns.
+          examples: [90210]
+        phone_number:
+          type: [string, 'null']
+          description: The rented phone number, when assigned.
+          examples: ['+6281234567890']
+        otp_code:
+          type: [string, 'null']
+          description: >-
+            The parsed verification code. Present on `order.otp_received`; `null`
+            otherwise (or when not yet parsed).
+          examples: ['123456']
+        otp_message:
+          type: [string, 'null']
+          description: The full received SMS text, when available.
+          examples: ['Your code is 123456']
+        product_id:
+          type: integer
+          format: int32
+          description: The product (tier) id of the order.
+          examples: [1024]
+        catalog_product_id:
+          type: [integer, 'null']
+          format: int32
+          description: The stable catalog id the order is linked to, when set.
+          examples: [88]
+        country:
+          type: [string, 'null']
+          description: The country name of the order's product, when known.
+          examples: [Indonesia]
+        platform:
+          type: [string, 'null']
+          description: The service/platform name of the order's product, when known.
+          examples: [WhatsApp]
+        can_finish:
+          type: boolean
+          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+        can_resend:
+          type: boolean
+          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+        can_cancel:
+          type: boolean
+          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+        can_replace:
+          type: boolean
+          description: "Server-authoritative: replace allowed (== can_cancel)."
+        resend_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When resend leaves cooldown; null when not in cooldown."
+        cancel_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "When the min-cancel window clears; null when already clear or evidence exists."
+        replace_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: "== cancel_available_at."
+
+    WebhookTestEvent:
+      type: object
+      title: WebhookTestEvent
+      description: >-
+        The body POSTed to your `webhook_url` by `POST /webhook/test`. Signed the
+        same way as `WebhookEvent` (the `X-Webhook-Signature` header, when a
+        secret is set).
+      required: [event, timestamp, data]
+      additionalProperties: false
+      properties:
+        event:
+          type: string
+          const: webhook.test
+          description: Always `webhook.test`.
+          examples: [webhook.test]
+        timestamp:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp of when the test event was emitted.
+          examples: ['2026-05-11T09:05:00+00:00']
+        data:
+          type: object
+          additionalProperties: false
+          required: [message]
+          description: A fixed marker payload.
+          properties:
+            message:
+              type: string
+              description: A constant human-readable marker string.
+              examples: ['This is a test webhook event from SMSCode.']
+
+  parameters:
+    CountryIdQuery:
+      name: country_id
+      in: query
+      required: false
+      description: Filter by country (`V1Country.id`).
+      schema:
+        type: integer
+        format: int32
+      examples:
+        indonesia:
+          value: 6
+    PlatformIdQuery:
+      name: platform_id
+      in: query
+      required: false
+      description: Filter by service/platform (`V1Service.id`).
+      schema:
+        type: integer
+        format: int32
+      examples:
+        whatsapp:
+          value: 1
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Maximum number of items per page. Clamped server-side to the range
+        1–10000; defaults to 1000.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 10000
+        default: 1000
+    PageQuery:
+      name: page
+      in: query
+      required: false
+      description: 1-based page number. Defaults to 1.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        default: 1
+    SortQuery:
+      name: sort
+      in: query
+      required: false
+      description: >-
+        Sort order for the product list. Unknown values fall back to
+        `price_asc`.
+      schema:
+        type: string
+        default: price_asc
+        enum:
+          - price_asc
+          - price_desc
+          - available_asc
+          - available_desc
+          - name_asc
+          - name_desc
+    PairQuery:
+      name: pair
+      in: query
+      required: false
+      description: >-
+        The currency pair to look up, formatted `BASE/QUOTE`. Defaults to
+        `USD/IDR`. On `/v2` this parameter is accepted for symmetry but
+        ignored — the pair is always `USD/IDR`.
+      schema:
+        type: string
+        default: USD/IDR
+      examples:
+        usdIdr:
+          value: USD/IDR
+    OrderLimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Maximum number of orders per page. Clamped server-side to the range
+        1–100; defaults to 20.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 100
+        default: 20
+    OrderOffsetQuery:
+      name: offset
+      in: query
+      required: false
+      description: Number of orders to skip (for pagination). Defaults to 0.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        default: 0
+    OrderStatusQuery:
+      name: status
+      in: query
+      required: false
+      description: >-
+        Filter by order status (case-insensitive). Omit to return every status.
+      schema:
+        type: string
+        enum:
+          - ACTIVE
+          - OTP_RECEIVED
+          - COMPLETED
+          - CANCELED
+          - EXPIRED
+    IdempotencyKey:
+      name: idempotency-key
+      in: header
+      required: false
+      description: >-
+        Optional idempotency key so a retried write is applied at most once.
+        Reuse the SAME key (and an identical request body) to safely retry. A
+        retry with a different body is rejected with `422 IDEMPOTENCY_KEY_REUSED`;
+        a retry while the original is still settling returns
+        `409 REQUEST_IN_PROGRESS`. Omit it and the server generates one per
+        request (no cross-request deduplication).
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{1,128}$'
+      examples:
+        uuid:
+          value: 1f1d3b6e-2a4c-4f7e-9b0a-9c8d7e6f5a4b
+    OrderIdPath:
+      name: id
+      in: path
+      required: true
+      description: The order identifier.
+      schema:
+        type: integer
+        format: int32
+      examples:
+        order:
+          value: 90210
+    WebhookSignatureHeader:
+      name: X-Webhook-Signature
+      in: header
+      required: false
+      description: >-
+        Present on outbound webhook POSTs when a `webhook_secret` is configured.
+        The value is `sha256=<hex>` where `<hex>` is the lowercase-hex
+        HMAC-SHA256 of the **raw request body**, keyed by your secret. Recompute
+        it over the exact received bytes and compare (constant-time) before
+        trusting the payload. Absent when no secret is set.
+      schema:
+        type: string
+        pattern: '^sha256=[0-9a-f]{64}$'
+      examples:
+        signed:
+          value: sha256=4d1e2f3a4b5c6d7e8f90112233445566778899aabbccddeeff00112233445566
+
+  responses:
+    Unauthorized:
+      description: >-
+        Authentication failed — the API key is missing or invalid
+        (`UNAUTHORIZED`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthorized:
+              value:
+                success: false
+                error:
+                  code: UNAUTHORIZED
+                  message: Authentication required
+
+    Forbidden:
+      description: >-
+        Authenticated, but the caller is not permitted to perform this action
+        (`FORBIDDEN`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            forbidden:
+              value:
+                success: false
+                error:
+                  code: FORBIDDEN
+                  message: You do not have access to this resource
+
+    NotFound:
+      description: The requested resource does not exist (`NOT_FOUND`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              value:
+                success: false
+                error:
+                  code: NOT_FOUND
+                  message: Resource not found
+
+    Conflict:
+      description: >-
+        The request conflicts with the current state of the resource. The
+        `error.code` is one of `CONFLICT`, `INSUFFICIENT_BALANCE`, or
+        `REQUEST_IN_PROGRESS` (all HTTP 409).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            conflict:
+              value:
+                success: false
+                error:
+                  code: CONFLICT
+                  message: The resource is in a conflicting state
+            insufficientBalance:
+              value:
+                success: false
+                error:
+                  code: INSUFFICIENT_BALANCE
+                  message: Not enough balance
+            requestInProgress:
+              value:
+                success: false
+                error:
+                  code: REQUEST_IN_PROGRESS
+                  message: A create request with this idempotency key is in progress
+
+    UnprocessableEntity:
+      description: >-
+        The request could not be processed. The `error.code` is one of
+        `VALIDATION_ERROR`, `PROVIDER_ERROR`, `NO_OFFER_AVAILABLE`, or
+        `IDEMPOTENCY_KEY_REUSED` (all HTTP 422).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validation:
+              value:
+                success: false
+                error:
+                  code: VALIDATION_ERROR
+                  message: Invalid request parameters
+            provider:
+              value:
+                success: false
+                error:
+                  code: PROVIDER_ERROR
+                  message: The SMS provider rejected the request
+            noOffer:
+              value:
+                success: false
+                error:
+                  code: NO_OFFER_AVAILABLE
+                  message: No offer matches the requested product and policy
+            idempotencyKeyReused:
+              value:
+                success: false
+                error:
+                  code: IDEMPOTENCY_KEY_REUSED
+                  message: idempotency key was already used with a different request
+
+    TooManyRequests:
+      description: >-
+        Rate limited. The `error.code` is `RATE_LIMIT_EXCEEDED` for ordinary
+        throttling, or `TEMP_BANNED_ABUSE_GUARD` when an abuse tripwire trips
+        (both HTTP 429). Honor the `Retry-After` header before retrying.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            rateLimited:
+              value:
+                success: false
+                error:
+                  code: RATE_LIMIT_EXCEEDED
+                  message: Too many requests
+            tempBanned:
+              value:
+                success: false
+                error:
+                  code: TEMP_BANNED_ABUSE_GUARD
+                  message: >-
+                    Order creation temporarily blocked due to high failure
+                    rate. Try again in 240 minutes (at 14:35 UTC).
+                  details:
+                    until: '2026-05-11T14:35:00+00:00'
+                    tier: HARD
+                    retry_after_seconds: 14400
+
+    InternalServerError:
+      description: An unexpected server error occurred (`INTERNAL_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            internal:
+              value:
+                success: false
+                error:
+                  code: INTERNAL_ERROR
+                  message: Internal server error
+
+    ServiceUnavailable:
+      description: >-
+        The service is temporarily unavailable. The `error.code` is
+        `SERVICE_UNAVAILABLE`, or `FX_RATE_UNAVAILABLE` when the USD/IDR rate
+        cannot be sourced for a `/v2` projection (both HTTP 503). A
+        `Retry-After` header may be present.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            serviceUnavailable:
+              value:
+                success: false
+                error:
+                  code: SERVICE_UNAVAILABLE
+                  message: Service temporarily unavailable
+            fxUnavailable:
+              value:
+                success: false
+                error:
+                  code: FX_RATE_UNAVAILABLE
+                  message: USD/IDR exchange rate is unavailable

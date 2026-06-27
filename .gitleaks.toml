@@ -1,0 +1,17 @@
+# gitleaks config for the public @smscode/sdk repo.
+#
+# Keeps ALL default gitleaks rules ([extend].useDefault) and allowlists ONLY the
+# specific fabricated example/test fixtures below — they are NOT real secrets.
+# The allowlist matches exact values, so ANY other secret is still detected.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known public test/doc fixtures — fabricated example values, not real secrets."
+regexes = [
+  # The example webhook_secret used in the OpenAPI `webhook_secret` examples and
+  # in the webhook HMAC unit test (a hand-patterned 64-hex placeholder).
+  '''3f8a1c4e9b2d7a6f0c5e1d8b4a7f2e9c3b6d0a5f8e1c4b7d2a9f6e3c0b5d8a1f''',
+  # A fixed idempotency-key fixture in the idempotency tests.
+  '''my-fixed-key_123''',
+]

@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/sdk-js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run gen:types
+      - run: bun run check:types
+      - run: bunx tsc -p tsconfig.examples.json
+      - name: await-guard (the webhook example must await verifyWebhookSignature)
+        run: |
+          grep -q 'await verifyWebhookSignature' examples/webhook.ts
+          ! grep 'verifyWebhookSignature(' examples/webhook.ts | grep -qv await
+      - run: bun run build
+      - run: bun run test
+      - run: bun run lint
+      - run: npm pack --dry-run
