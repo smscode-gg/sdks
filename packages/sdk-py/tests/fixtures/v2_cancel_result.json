@@ -1,0 +1,1 @@
+{"success":true,"status":200,"data":{"order_id":1,"status":"CANCELED","refund_amount":{"amount":"0.0077","currency":"USD","canonical_amount":139,"canonical_currency":"IDR"},"new_balance":{"amount":"28.78","currency":"USD","canonical_amount":517231,"canonical_currency":"IDR"}},"meta":{"fx":{"pair":"USD/IDR","rate":17970,"rate_as_of":"2026-06-27T00:00:00Z"}}}

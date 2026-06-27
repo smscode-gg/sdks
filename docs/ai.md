@@ -1,6 +1,6 @@
 # SMSCode for AI Agents
 
-Compact integration guidance for coding agents building on the SMSCode virtual-number API. Pair this with the OpenAPI contract and the [`@smscode/sdk`](https://github.com/smscode-gg/sdks) TypeScript/JavaScript client.
+Compact integration guidance for coding agents building on the SMSCode virtual-number API. Pair this with the OpenAPI contract and the official SDKs in [`smscode-gg/sdks`](https://github.com/smscode-gg/sdks): `@smscode/sdk` for TypeScript/JavaScript and `smscode` for Python.
 
 - **OpenAPI contract (source of truth):** [`openapi.yaml`](https://smscode.gg/openapi.yaml) — hand-authored OpenAPI 3.1; every request/response shape lives here. Rendered for humans at <https://smscode.gg/docs>.
 - **Base URL:** `https://api.smscode.gg`
@@ -50,8 +50,16 @@ In the SDK each code maps to a typed subclass of `SmscodeError` (e.g. `RateLimit
 
 ## Install the SDK
 
+TypeScript/JavaScript:
+
 ```bash
 bun add @smscode/sdk    # or: npm i @smscode/sdk
+```
+
+Python:
+
+```bash
+pip install smscode
 ```
 
 ## Recipe: create → waitForOtp → finish (cancel only on no-OTP)
@@ -147,4 +155,51 @@ const event = parseWebhookEvent(rawBody);
 if (event.event === "order.otp_received") {
   console.log(event.data.otp_code);
 }
+```
+
+## Python SDK recipe
+
+Python uses snake_case names but follows the same lifecycle and idempotency rules:
+
+```py
+import os
+
+from smscode import OtpTimeoutError, OrderTerminalError, SmscodeClient
+
+client = SmscodeClient(token=os.environ["SMSCODE_TOKEN"])
+
+body = {
+    "catalog_product_id": int(os.environ["SMSCODE_CATALOG_PRODUCT_ID"]),
+    "max_price": "0.50",  # /v2 USD decimal string
+    "quantity": 1,
+}
+
+with client:
+    created = client.orders.create(body)
+    order_id = int(created.orders[0]["id"])
+
+    try:
+        otp = client.orders.wait_for_otp(order_id, timeout_ms=120_000)
+        # Submit otp.otp_code in your target app here.
+        client.orders.finish(order_id)
+    except (OtpTimeoutError, OrderTerminalError):
+        client.orders.cancel(order_id)
+```
+
+For resend flows, preserve the previous code:
+
+```py
+first = client.orders.wait_for_otp(order_id)
+client.orders.resend(order_id)
+second = client.orders.wait_for_otp(order_id, after_code=first.otp_code)
+```
+
+Verify Python webhook signatures with raw bytes:
+
+```py
+from smscode import parse_webhook_event, verify_webhook_signature
+
+if not verify_webhook_signature(raw_body, signature_header or "", secret):
+    return 401
+event = parse_webhook_event(raw_body)
 ```

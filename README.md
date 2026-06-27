@@ -5,6 +5,7 @@ Official client SDKs for the [SMSCode](https://smscode.gg) virtual-number API �
 ## Packages
 
 - [`@smscode/sdk`](packages/sdk-js) — TypeScript/JavaScript SDK. Install with `bun add @smscode/sdk` (or `npm i @smscode/sdk`).
+- [`smscode`](packages/sdk-py) — Python SDK. Install with `pip install smscode`.
 
 ## Documentation
 

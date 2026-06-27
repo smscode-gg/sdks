@@ -1,0 +1,1 @@
+{"event":"order.completed","timestamp":"2026-06-27T00:00:00Z","data":{"order_id":1,"status":"COMPLETED","can_finish":false,"can_resend":false,"can_cancel":false,"can_replace":false,"resend_available_at":null,"cancel_available_at":null,"replace_available_at":null}}

@@ -1,0 +1,1 @@
+{"event":"order.otp_received","timestamp":"2026-06-27T09:00:00Z","data":{"order_id":1,"product_id":10,"otp_code":"123456","otp_message":"Your code is 123456","can_finish":true,"can_resend":true,"can_cancel":false,"can_replace":false,"resend_available_at":null,"cancel_available_at":null,"replace_available_at":null}}
