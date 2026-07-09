@@ -286,7 +286,7 @@ def test_operators_requires_both_coordinates(resource: type) -> None:
     """
     # eval_str resolves the stringized PEP 563 annotations (`from __future__
     # import annotations`) back to real types so `annotation is int` holds.
-    params = inspect.signature(resource.operators, eval_str=True).parameters
+    params = inspect.signature(resource.operators, eval_str=True).parameters  # type: ignore[attr-defined]
     for coord in ("country_id", "platform_id"):
         assert coord in params, f"{resource.__name__}.operators missing '{coord}'"
         p = params[coord]
