@@ -66,11 +66,29 @@ class Service:
 
 
 @dataclass(frozen=True)
+class Operator:
+    operator_id: int | None
+    code: str
+    name: str | None = None
+    local_name: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, compare=False)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.raw[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.raw.get(key, default)
+
+
+@dataclass(frozen=True)
 class OrderCapabilities:
     can_finish: bool
     can_resend: bool
     can_cancel: bool
     can_replace: bool
+    # Server-authoritative reactivation flag (a completed order whose number
+    # supports reactivation).
+    can_reactivate: bool
     resend_available_at: str | None = None
     cancel_available_at: str | None = None
     replace_available_at: str | None = None
@@ -171,6 +189,8 @@ class Product:
     price: Money | int | None
     active: bool
     catalog_product_id: int | None = None
+    operator_id: int | None = None
+    operator_name: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, compare=False)
 
     def __getitem__(self, key: str) -> Any:
@@ -256,6 +276,22 @@ class CancelResultV2(CancelResult):
     status: str
     refund_amount: Money
     new_balance: Money
+    fx: V2Fx
+
+
+@dataclass(frozen=True)
+class ReactivateOptions:
+    """A read-only reactivation cost preview. ``/v1`` ``cost`` is an IDR int."""
+
+    cost: Money | int
+    fx: V2Fx | None = None
+
+
+@dataclass(frozen=True)
+class ReactivateOptionsV2(ReactivateOptions):
+    """The ``/v2`` reactivation preview — ``cost`` projected to a USD :class:`Money` + FX."""
+
+    cost: Money
     fx: V2Fx
 
 

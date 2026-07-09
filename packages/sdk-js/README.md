@@ -210,6 +210,71 @@ try {
 }
 ```
 
+## Example 5 — Order a specific operator (carrier)
+
+Some countries expose per-operator (carrier) tiers, e.g. Telkomsel or XL. `client.catalog.operators` lists the operators that currently have stock for a `(country, service)`, plus a synthesized `any` coordinate (null `operator_id`) when the carrier-agnostic tiers also have stock — an empty list means there is no operator choice (order the `any` tiers directly). Pass an `operator_id` to `client.catalog.products` to filter the catalog, and to `client.orders.create` on the routed path (with `catalog_product_id`) to rent a number from that carrier. Every product and order echoes `operator_id`/`operator_name`.
+
+```ts
+// 1. Operators with stock for WhatsApp / Indonesia (country_id 7).
+const operators = await client.catalog.operators({
+  country_id: 7,
+  platform_id: Number(process.env.SMSCODE_PLATFORM_ID),
+});
+// `operator_id` is null for the synthesized `any` (carrier-agnostic) entry.
+const telkomsel = operators.find((o) => o.code === "telkomsel");
+if (!telkomsel?.operator_id) throw new Error("Telkomsel has no stock right now");
+
+// 2. Filter the catalog to that operator's tiers.
+const page = await client.catalog.products({
+  country_id: 7,
+  platform_id: Number(process.env.SMSCODE_PLATFORM_ID),
+  operator_id: telkomsel.operator_id,
+});
+const product = page.products.find((p) => p.available > 0 && p.active);
+if (!product?.catalog_product_id) throw new Error("No available Telkomsel product");
+
+// 3. Rent a number routed to that operator (routed path → `catalog_product_id`).
+//    `operator_id`, `max_price` (USD ceiling), and `min_price` (USD floor) are
+//    routing knobs valid only with `catalog_product_id`.
+const { orders } = await client.orders.create({
+  catalog_product_id: product.catalog_product_id,
+  operator_id: telkomsel.operator_id,
+  max_price: "0.50", // USD decimal string
+});
+const order = orders[0]!;
+console.log(`Order ${order.id} — operator ${order.operator_name} (#${order.operator_id})`);
+```
+
+## Example 6 — Reactivate a completed number
+
+Some completed orders can be **reactivated** — re-order the SAME number to receive another code on it, without renting a fresh number. Check `can_reactivate` on the order (it is server-authoritative), preview the cost, then reactivate. `reactivate` is a money mutation with the SAME idempotency contract as `create` — reuse `error.idempotencyKey` on a transient failure, never mint a new key. It returns the SAME shape as `create` (the one reactivated child order).
+
+```ts
+import { SmscodeClient } from "@smscode/sdk";
+
+const client = new SmscodeClient({ token: process.env.SMSCODE_TOKEN! });
+
+const orderId = Number(process.env.SMSCODE_ORDER_ID);
+
+// 1. Only a completed order whose number supports reactivation qualifies.
+const order = await client.orders.get(orderId);
+if (!order.can_reactivate) throw new Error("This order cannot be reactivated");
+
+// 2. Preview the current cost (read-only — no idempotency key, no charge).
+const { cost } = await client.orders.reactivateOptions(orderId);
+console.log(`Reactivation costs ${cost.amount} USD`);
+
+// 3. Reactivate. `max_price` (USD decimal string) caps the cost; the child is a NEW order.
+const { orders } = await client.orders.reactivate(orderId, { max_price: "0.50" });
+const child = orders[0]!;
+console.log(`Reactivated as order ${child.id}; charged ${child.amount.amount} USD`);
+
+// Then wait for the new OTP exactly as in Example 1.
+const otp = await client.orders.waitForOtp(child.id, { timeoutMs: 120_000 });
+console.log(`new OTP ${otp.otpCode}`);
+await client.orders.finish(child.id);
+```
+
 ## Error model
 
 Every failure is a `SmscodeError` (or a subclass). Business failures carry a stable `code`; the 16 codes map to typed subclasses — `UnauthorizedError`, `ForbiddenError`, `NotFoundError`, `ValidationError`, `ProviderError`, `NoOfferAvailableError`, `IdempotencyKeyReuseError`, `InsufficientBalanceError`, `ConflictError`, `CancelTooEarlyError`, `RequestInProgressError`, `RateLimitError`, `TempBannedError`, `ServiceUnavailableError`, `FxRateUnavailableError`, `InternalError`. Transport failures are `NetworkError` / `TimeoutError` / `AbortError`; `waitForOtp` adds `OrderTerminalError` and `OtpTimeoutError`. On `429`/`503`, `err.retryAfterSeconds` reflects the `Retry-After` header. See [`docs/ai.md`](https://github.com/smscode-gg/sdks/blob/main/docs/ai.md) for the full code → HTTP-status table.

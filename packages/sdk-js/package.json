@@ -1,6 +1,6 @@
 {
   "name": "@smscode/sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Official TypeScript/JavaScript SDK for the SMSCode virtual number API — rent temporary phone numbers and receive OTP/SMS verification codes programmatically.",
   "license": "MIT",
   "type": "module",

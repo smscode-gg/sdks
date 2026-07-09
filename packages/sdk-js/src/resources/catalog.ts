@@ -31,6 +31,7 @@ type V1ExchangeRate = components["schemas"]["V1ExchangeRate"];
 type V2Fx = components["schemas"]["V2Fx"];
 type PaginationMeta = components["schemas"]["PaginationMeta"];
 type V2ProductsMeta = components["schemas"]["V2ProductsMeta"];
+export type V1Operator = components["schemas"]["V1Operator"];
 
 /** Query parameters shared by the `services` listing. */
 export interface ServicesParams {
@@ -44,6 +45,8 @@ export interface ProductsParams {
   country_id?: number;
   /** Filter by service/platform (`V1Service.id`). */
   platform_id?: number;
+  /** Filter to a specific operator (`V1Operator.operator_id` from `operators()`); omit for the `any` coordinate. */
+  operator_id?: number;
   /** Max items per page (server-clamped 1–10000; default 1000). */
   limit?: number;
   /** 1-based page number (default 1). */
@@ -99,12 +102,23 @@ export class V2CatalogResource {
     return data ?? [];
   }
 
+  /** List the in-stock operators for a (country, service) (+ the conditional `any`). */
+  async operators(params: { country_id: number; platform_id: number }): Promise<V1Operator[]> {
+    const { data } = await this.request<V1Operator[]>(
+      "GET",
+      "/v2/catalog/operators",
+      { query: { country_id: params.country_id, platform_id: params.platform_id } },
+    );
+    return data ?? [];
+  }
+
   /** List a page of products with USD-projected prices + the FX receipt. */
   async products(params: ProductsParams = {}): Promise<ProductsPageV2> {
     const result = await this.request<V2Product[]>("GET", "/v2/catalog/products", {
       query: {
         country_id: params.country_id,
         platform_id: params.platform_id,
+        operator_id: params.operator_id,
         limit: params.limit,
         page: params.page,
         sort: params.sort,
@@ -158,12 +172,23 @@ export class V1CatalogResource {
     return data ?? [];
   }
 
+  /** List the in-stock operators for a (country, service) (+ the conditional `any`). */
+  async operators(params: { country_id: number; platform_id: number }): Promise<V1Operator[]> {
+    const { data } = await this.request<V1Operator[]>(
+      "GET",
+      "/v1/catalog/operators",
+      { query: { country_id: params.country_id, platform_id: params.platform_id } },
+    );
+    return data ?? [];
+  }
+
   /** List a page of products with IDR prices + pagination metadata. */
   async products(params: ProductsParams = {}): Promise<ProductsPageV1> {
     const result = await this.request<V1Product[]>("GET", "/v1/catalog/products", {
       query: {
         country_id: params.country_id,
         platform_id: params.platform_id,
+        operator_id: params.operator_id,
         limit: params.limit,
         page: params.page,
         sort: params.sort,

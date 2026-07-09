@@ -7,6 +7,7 @@ from smscode.errors import InvalidResponseError
 from smscode.models import (
     Country,
     ExchangeRate,
+    Operator,
     Product,
     ProductsPageV1,
     ProductsPageV2,
@@ -32,6 +33,7 @@ def _products_params(
     *,
     country_id: int | None = None,
     platform_id: int | None = None,
+    operator_id: int | None = None,
     limit: int | None = None,
     page: int | None = None,
     sort: SortQuery | None = None,
@@ -39,6 +41,7 @@ def _products_params(
     return {
         "country_id": country_id,
         "platform_id": platform_id,
+        "operator_id": operator_id,
         "limit": limit,
         "page": page,
         "sort": sort,
@@ -90,6 +93,10 @@ def _decode_v2_product(item: Mapping[str, Any]) -> ProductV2:
         price=parse_money(item.get("price")),
         active=bool(item["active"]),
         catalog_product_id=_int_or_none(item.get("catalog_product_id")),
+        operator_id=_int_or_none(item.get("operator_id")),
+        operator_name=(
+            item.get("operator_name") if isinstance(item.get("operator_name"), str) else None
+        ),
         raw=raw,
     )
 
@@ -105,6 +112,10 @@ def _decode_v1_product(item: Mapping[str, Any]) -> Product:
         price=item.get("price") if type(item.get("price")) is int else None,
         active=bool(item["active"]),
         catalog_product_id=_int_or_none(item.get("catalog_product_id")),
+        operator_id=_int_or_none(item.get("operator_id")),
+        operator_name=(
+            item.get("operator_name") if isinstance(item.get("operator_name"), str) else None
+        ),
         raw=raw,
     )
 
@@ -144,6 +155,25 @@ def _decode_countries(data: object) -> list[Country]:
 def _decode_services(data: object) -> list[Service]:
     return (
         [_decode_service(item) for item in data if isinstance(item, Mapping)]
+        if isinstance(data, list)
+        else []
+    )
+
+
+def _decode_operator(item: Mapping[str, Any]) -> Operator:
+    raw = dict(item)
+    return Operator(
+        operator_id=_int_or_none(item.get("operator_id")),
+        code=str(item["code"]),
+        name=item.get("name") if isinstance(item.get("name"), str) else None,
+        local_name=item.get("local_name") if isinstance(item.get("local_name"), str) else None,
+        raw=raw,
+    )
+
+
+def _decode_operators(data: object) -> list[Operator]:
+    return (
+        [_decode_operator(item) for item in data if isinstance(item, Mapping)]
         if isinstance(data, list)
         else []
     )
@@ -192,6 +222,7 @@ class V2CatalogResource:
         *,
         country_id: int | None = None,
         platform_id: int | None = None,
+        operator_id: int | None = None,
         limit: int | None = None,
         page: int | None = None,
         sort: SortQuery | None = None,
@@ -202,12 +233,21 @@ class V2CatalogResource:
             params=_products_params(
                 country_id=country_id,
                 platform_id=platform_id,
+                operator_id=operator_id,
                 limit=limit,
                 page=page,
                 sort=sort,
             ),
         )
         return _decode_v2_products(result)
+
+    def operators(self, *, country_id: int, platform_id: int) -> list[Operator]:
+        result = self._request(
+            "GET",
+            "/v2/catalog/operators",
+            params={"country_id": country_id, "platform_id": platform_id},
+        )
+        return _decode_operators(result.data)
 
     def exchange_rate(self, *, pair: str | None = None) -> V2Fx:
         result = self._request(
@@ -239,6 +279,7 @@ class V1CatalogResource:
         *,
         country_id: int | None = None,
         platform_id: int | None = None,
+        operator_id: int | None = None,
         limit: int | None = None,
         page: int | None = None,
         sort: SortQuery | None = None,
@@ -249,12 +290,21 @@ class V1CatalogResource:
             params=_products_params(
                 country_id=country_id,
                 platform_id=platform_id,
+                operator_id=operator_id,
                 limit=limit,
                 page=page,
                 sort=sort,
             ),
         )
         return _decode_v1_products(result)
+
+    def operators(self, *, country_id: int, platform_id: int) -> list[Operator]:
+        result = self._request(
+            "GET",
+            "/v1/catalog/operators",
+            params={"country_id": country_id, "platform_id": platform_id},
+        )
+        return _decode_operators(result.data)
 
     def exchange_rate(self, *, pair: str | None = None) -> ExchangeRate:
         result = self._request(
@@ -286,6 +336,7 @@ class AsyncV2CatalogResource:
         *,
         country_id: int | None = None,
         platform_id: int | None = None,
+        operator_id: int | None = None,
         limit: int | None = None,
         page: int | None = None,
         sort: SortQuery | None = None,
@@ -296,12 +347,21 @@ class AsyncV2CatalogResource:
             params=_products_params(
                 country_id=country_id,
                 platform_id=platform_id,
+                operator_id=operator_id,
                 limit=limit,
                 page=page,
                 sort=sort,
             ),
         )
         return _decode_v2_products(result)
+
+    async def operators(self, *, country_id: int, platform_id: int) -> list[Operator]:
+        result = await self._request(
+            "GET",
+            "/v2/catalog/operators",
+            params={"country_id": country_id, "platform_id": platform_id},
+        )
+        return _decode_operators(result.data)
 
     async def exchange_rate(self, *, pair: str | None = None) -> V2Fx:
         result = await self._request(
@@ -333,6 +393,7 @@ class AsyncV1CatalogResource:
         *,
         country_id: int | None = None,
         platform_id: int | None = None,
+        operator_id: int | None = None,
         limit: int | None = None,
         page: int | None = None,
         sort: SortQuery | None = None,
@@ -343,12 +404,21 @@ class AsyncV1CatalogResource:
             params=_products_params(
                 country_id=country_id,
                 platform_id=platform_id,
+                operator_id=operator_id,
                 limit=limit,
                 page=page,
                 sort=sort,
             ),
         )
         return _decode_v1_products(result)
+
+    async def operators(self, *, country_id: int, platform_id: int) -> list[Operator]:
+        result = await self._request(
+            "GET",
+            "/v1/catalog/operators",
+            params={"country_id": country_id, "platform_id": platform_id},
+        )
+        return _decode_operators(result.data)
 
     async def exchange_rate(self, *, pair: str | None = None) -> ExchangeRate:
         result = await self._request(

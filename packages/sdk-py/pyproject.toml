@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smscode"
-version = "1.0.0"
+version = "1.1.0"
 description = "Official Python SDK for the SMSCode virtual number API."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,7 +47,7 @@ Repository = "https://github.com/smscode-gg/sdks"
 Issues = "https://github.com/smscode-gg/sdks/issues"
 
 [dependency-groups]
-test = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21", "pyyaml>=6"]
+test = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21", "pyyaml>=6", "jsonschema>=4.18"]
 lint = ["ruff>=0.8"]
 type = ["mypy>=1.11"]
 build = ["build>=1.2", "twine>=5"]

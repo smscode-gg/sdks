@@ -1,1 +1,1 @@
-{"success":true,"status":200,"data":{"id":1,"status":"OTP_RECEIVED","product_id":10,"amount":139,"otp_code":"123456","can_finish":true,"can_resend":true,"can_cancel":false,"can_replace":false,"resend_available_at":null,"cancel_available_at":null,"replace_available_at":null}}
+{"success":true,"status":200,"data":{"id":1,"status":"OTP_RECEIVED","product_id":10,"amount":139,"otp_code":"123456","can_finish":true,"can_resend":true,"can_cancel":false,"can_replace":false,"can_reactivate":false,"resend_available_at":null,"cancel_available_at":null,"replace_available_at":null}}

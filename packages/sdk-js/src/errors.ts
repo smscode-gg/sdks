@@ -364,8 +364,6 @@ function ctorForStatus(
   switch (status) {
     case 401:
       return UnauthorizedError;
-    case 402:
-      return InsufficientBalanceError;
     case 403:
       return ForbiddenError;
     case 404:

@@ -76,6 +76,26 @@ export interface CreateOrderOptions {
 }
 
 /**
+ * Per-reactivate options for the `/v2` surface — {@link CreateOrderOptions}
+ * (money-safety idempotency key + abort signal) plus an optional USD-decimal cost
+ * CEILING that mirrors the `/v2` create `max_price` unit.
+ */
+export interface ReactivateOrderOptionsV2 extends CreateOrderOptions {
+  /** USD-decimal string cost CEILING (e.g. `"0.75"`); refuse if the cost exceeds it. */
+  max_price?: string;
+}
+
+/**
+ * Per-reactivate options for the `/v1` surface — {@link CreateOrderOptions}
+ * plus an optional IDR-integer cost CEILING that mirrors the `/v1` create
+ * `max_price` unit.
+ */
+export interface ReactivateOrderOptionsV1 extends CreateOrderOptions {
+  /** IDR-integer cost CEILING (minor units); refuse if the reactivation cost exceeds it. */
+  max_price?: number;
+}
+
+/**
  * `/v1` create request — the generated contract shape with `quantity` made
  * OPTIONAL.
  *
@@ -151,6 +171,27 @@ export interface CancelResultV2 extends Omit<V2CancelResult, "refund_amount" | "
   new_balance: Money;
   /** The FX receipt the response was projected at. */
   fx: V2Fx;
+}
+
+/**
+ * The decoded `/v2` reactivate-options preview — the reactivation cost
+ * projected to a USD {@link Money} object plus the FX receipt. A read-only quote
+ * (NO idempotency key); mirrors the order-amount precision (4dp, price-derived).
+ */
+export interface ReactivateOptionsV2 {
+  /** The reactivation cost right now, projected to a USD {@link Money}. */
+  cost: Money;
+  /** The FX receipt the cost was projected at. */
+  fx: V2Fx;
+}
+
+/**
+ * The `/v1` reactivate-options preview — the reactivation cost in IDR minor
+ * units (integer). A read-only quote (NO idempotency key).
+ */
+export interface ReactivateOptionsV1 {
+  /** The reactivation cost right now, in IDR minor units. */
+  cost: number;
 }
 
 /**
@@ -279,6 +320,40 @@ function decodeV2CreateResult(
   return { ...data, orders, fx, idempotencyKey: key };
 }
 
+/**
+ * Decode a `/v1` create/reactivate success envelope into a {@link CreateOrderResultV1}.
+ *
+ * `/v1` amounts are plain IDR numbers (no Money projection), so this is trivial —
+ * but it still validates the envelope shape. `/v1` has no money projection (no
+ * `parseMoney`/`requireFx` to fail on a bad shape), so without this a malformed
+ * 2xx (absent/empty `data`) would spread to a SILENT no-op and return a broken
+ * `{ idempotencyKey }`. A 200 may mean the order is placed/debited, so throw a
+ * TYPED `INVALID_RESPONSE` — the create boundary stamps it with the key (mirrors
+ * the `/v2` envelope guards). Shared by `create` and `reactivate` (both return the
+ * same `CreateOrderResult` shape).
+ */
+function decodeV1CreateResult(
+  result: ApiResult<unknown>,
+  key: string,
+): CreateOrderResultV1 {
+  const data = result.data;
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !Array.isArray((data as { orders?: unknown }).orders)
+  ) {
+    throw new SmscodeError(
+      "INVALID_RESPONSE",
+      "The /v1 response is missing its orders array; the result cannot be trusted.",
+      { httpStatus: result.status },
+    );
+  }
+  return {
+    ...(data as V1CreateOrderResult),
+    idempotencyKey: key,
+  };
+}
+
 /** The `/v2` orders surface (USD-projected). */
 export class V2OrdersResource {
   constructor(private readonly request: RequestFn) {}
@@ -401,6 +476,50 @@ export class V2OrdersResource {
   }
 
   /**
+   * Reactivate — re-order (buy another SMS on) a completed number that supports reactivation, USD-native.
+   *
+   * A MONEY mutation that mirrors {@link create} EXACTLY on the idempotency
+   * contract (key resolved up front, sent on the header, retried only on transient
+   * failures with the SAME key, attached to the result, and stamped onto EVERY
+   * thrown error). Returns the SAME create-result shape (the ONE reactivated child
+   * order): each `amount` is projected to a USD {@link Money} and the FX receipt is
+   * attached. `opts.max_price` is a USD-decimal string cost CEILING.
+   */
+  async reactivate(
+    orderId: number,
+    opts?: ReactivateOrderOptionsV2,
+  ): Promise<CreateOrderResultV2> {
+    const body: { id: number; max_price?: string } = { id: orderId };
+    if (opts?.max_price !== undefined) body.max_price = opts.max_price;
+    const { value } = await createWithIdempotency(
+      this.request,
+      "/v2/orders/reactivate",
+      body,
+      opts,
+      decodeV2CreateResult,
+    );
+    return value;
+  }
+
+  /**
+   * Reactivate-options — a read-only cost PREVIEW for {@link reactivate}, USD.
+   *
+   * Consumes NO idempotency key and writes nothing. The cost is projected to a USD
+   * {@link Money} object and the FX receipt is attached. A missing `meta.fx` throws
+   * a TYPED `INVALID_RESPONSE` (never a raw `TypeError`), consistent with the other
+   * `/v2` reads.
+   */
+  async reactivateOptions(orderId: number): Promise<ReactivateOptionsV2> {
+    const result = await this.request<{ cost: components["schemas"]["V2Money"] }>(
+      "GET",
+      `/v2/orders/${orderId}/reactivate-options`,
+    );
+    const fx = requireFx(result);
+    const data = result.data as { cost: components["schemas"]["V2Money"] };
+    return { cost: parseMoney(data.cost), fx };
+  }
+
+  /**
    * Poll until the order's OTP arrives, then resolve `{ otpCode, status, order }`.
    *
    * **Polls the FX-free `/v1/orders/{id}` path** (NOT `/v2`), so a `/v2` FX outage
@@ -442,30 +561,7 @@ export class V1OrdersResource {
       "/v1/orders/create",
       req,
       opts,
-      (result, key): CreateOrderResultV1 => {
-        // Validate the envelope shape. `/v1` has no money projection (no
-        // `parseMoney`/`requireFx` to fail on a bad shape), so without this a
-        // malformed 2xx (absent/empty `data`) would spread to a SILENT no-op and
-        // return a broken `{ idempotencyKey }`. A 200 may mean the order is
-        // placed/debited, so throw a TYPED `INVALID_RESPONSE` — the create
-        // boundary stamps it with the key (mirrors the `/v2` envelope guards).
-        const data = result.data;
-        if (
-          !data ||
-          typeof data !== "object" ||
-          !Array.isArray((data as { orders?: unknown }).orders)
-        ) {
-          throw new SmscodeError(
-            "INVALID_RESPONSE",
-            "The /v1 create response is missing its orders array; the result cannot be trusted.",
-            { httpStatus: result.status },
-          );
-        }
-        return {
-          ...(data as V1CreateOrderResult),
-          idempotencyKey: key,
-        };
-      },
+      decodeV1CreateResult,
     );
     return value;
   }
@@ -528,6 +624,44 @@ export class V1OrdersResource {
       orderId,
     );
     return data;
+  }
+
+  /**
+   * Reactivate — re-order (buy another SMS on) a completed number that supports reactivation, IDR.
+   *
+   * A MONEY mutation that mirrors {@link create} EXACTLY on the idempotency
+   * contract. Returns the SAME create-result shape (the ONE reactivated child
+   * order) with the IDR `amount` verbatim, plus the resolved `idempotencyKey`.
+   * `opts.max_price` is an IDR-integer cost CEILING.
+   */
+  async reactivate(
+    orderId: number,
+    opts?: ReactivateOrderOptionsV1,
+  ): Promise<CreateOrderResultV1> {
+    const body: { id: number; max_price?: number } = { id: orderId };
+    if (opts?.max_price !== undefined) body.max_price = opts.max_price;
+    const { value } = await createWithIdempotency(
+      this.request,
+      "/v1/orders/reactivate",
+      body,
+      opts,
+      decodeV1CreateResult,
+    );
+    return value;
+  }
+
+  /**
+   * Reactivate-options — a read-only cost PREVIEW for {@link reactivate}, IDR.
+   *
+   * Consumes NO idempotency key and writes nothing. Returns the cost in IDR minor
+   * units verbatim.
+   */
+  async reactivateOptions(orderId: number): Promise<ReactivateOptionsV1> {
+    const { data } = await this.request<ReactivateOptionsV1>(
+      "GET",
+      `/v1/orders/${orderId}/reactivate-options`,
+    );
+    return data as ReactivateOptionsV1;
   }
 
   /**

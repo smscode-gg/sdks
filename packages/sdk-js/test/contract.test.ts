@@ -284,11 +284,18 @@ describe("contract harness (offline, fixture-driven)", () => {
     expect(ok, harness.formatErrors(validate)).toBe(true);
   });
 
-  // the outbound webhook `data` ALWAYS emits the 7 capability fields
-  // (webhook_notifier::webhook_data_payload). The 4 booleans are `required`, so a
-  // caps-less payload MUST fail; a full payload MUST pass. These two fixtures pair
-  // with the Rust producer unit test to lock Finding 2 end-to-end.
-  it("ACCEPTS a WebhookEventData payload carrying all 7 capability fields", () => {
+  // the outbound webhook `data` ALWAYS emits the 7 capability fields AND the
+  // operator dimension (operator_id/operator_name) AND the 6 core fields
+  // (phone_number, otp_code, otp_message, catalog_product_id, country, platform)
+  // — webhook_notifier::webhook_data_payload. EVERY key is `required`, so a
+  // caps-less OR operator-less OR core-field-less payload MUST fail; a full
+  // payload MUST pass. These fixtures pair with the Rust producer unit test to
+  // lock Finding 2 + the #394C R2 operator drift + the R3 6-field looseness
+  // end-to-end. The 6 core fields + operator_id/operator_name + the *_available_at
+  // timestamps are required-but-nullable: the producer emits every key for EVERY
+  // order (a JSON `null` on `any`-operator orders or when unset, values
+  // otherwise), so both the non-null and the null any-path shape MUST validate.
+  it("ACCEPTS a WebhookEventData payload with a non-null operator (operator-routed order)", () => {
     const validate = harness.schemaValidator("WebhookEventData");
     const ok = validate({
       order_id: 90210,
@@ -299,10 +306,13 @@ describe("contract harness (offline, fixture-driven)", () => {
       catalog_product_id: 88,
       country: "Indonesia",
       platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
       can_finish: true,
       can_resend: true,
       can_cancel: false,
       can_replace: false,
+      can_reactivate: false,
       resend_available_at: null,
       cancel_available_at: null,
       replace_available_at: null,
@@ -310,10 +320,11 @@ describe("contract harness (offline, fixture-driven)", () => {
     expect(ok, harness.formatErrors(validate)).toBe(true);
   });
 
-  it("REJECTS a WebhookEventData payload missing the required capability booleans", () => {
-    // The producer always emits the 4 booleans → a caps-less `data` is drift.
+  it("ACCEPTS a WebhookEventData payload with null operator fields (any-path order)", () => {
+    // The producer emits operator_id/operator_name as present-but-null for an
+    // `any`-operator order. required-but-nullable → this MUST still validate.
     const validate = harness.schemaValidator("WebhookEventData");
-    const bad = validate({
+    const ok = validate({
       order_id: 90210,
       phone_number: "+6281234567890",
       otp_code: "123456",
@@ -322,14 +333,23 @@ describe("contract harness (offline, fixture-driven)", () => {
       catalog_product_id: 88,
       country: "Indonesia",
       platform: "WhatsApp",
+      operator_id: null,
+      operator_name: null,
+      can_finish: true,
+      can_resend: true,
+      can_cancel: false,
+      can_replace: false,
+      can_reactivate: false,
+      resend_available_at: null,
+      cancel_available_at: null,
+      replace_available_at: null,
     });
-    expect(bad).toBe(false);
+    expect(ok, harness.formatErrors(validate)).toBe(true);
   });
 
-  it("REJECTS a WebhookEventData payload missing the required capability timestamps", () => {
-    // The producer (webhook_notifier::webhook_data_payload) ALWAYS emits the 3
-    // *_available_at keys (null when not set). They're now `required` too, so a
-    // payload with the booleans but no timestamps is drift.
+  it("REJECTS a WebhookEventData payload missing the required operator fields", () => {
+    // The producer ALWAYS emits operator_id + operator_name (null for `any`), so a
+    // payload omitting the keys entirely is drift (matches the runtime contract).
     const validate = harness.schemaValidator("WebhookEventData");
     const bad = validate({
       order_id: 90210,
@@ -344,9 +364,244 @@ describe("contract harness (offline, fixture-driven)", () => {
       can_resend: true,
       can_cancel: false,
       can_replace: false,
+      can_reactivate: false,
+      resend_available_at: null,
+      cancel_available_at: null,
+      replace_available_at: null,
     });
     expect(bad).toBe(false);
   });
+
+  it("REJECTS a WebhookEventData payload with an unknown field (additionalProperties:false lock)", () => {
+    // WebhookEventData is `additionalProperties: false`, so a strict consumer
+    // generated from the published schema REJECTS unknown keys. This proves the
+    // lock the #394C R2 finding was about: the schema now matches the
+    // runtime payload EXACTLY — no more, no less.
+    const validate = harness.schemaValidator("WebhookEventData");
+    const bad = validate({
+      order_id: 90210,
+      phone_number: "+6281234567890",
+      otp_code: "123456",
+      otp_message: "Your code is 123456",
+      product_id: 1024,
+      catalog_product_id: 88,
+      country: "Indonesia",
+      platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
+      can_finish: true,
+      can_resend: true,
+      can_cancel: false,
+      can_replace: false,
+      can_reactivate: false,
+      resend_available_at: null,
+      cancel_available_at: null,
+      replace_available_at: null,
+      surprise_field: "drift",
+    });
+    expect(bad).toBe(false);
+  });
+
+  it("REJECTS a WebhookEventData payload missing the required capability booleans", () => {
+    // The producer always emits the 4 booleans → a caps-less `data` is drift.
+    // Operator fields present (non-null) so the ONLY missing thing is the booleans.
+    const validate = harness.schemaValidator("WebhookEventData");
+    const bad = validate({
+      order_id: 90210,
+      phone_number: "+6281234567890",
+      otp_code: "123456",
+      otp_message: "Your code is 123456",
+      product_id: 1024,
+      catalog_product_id: 88,
+      country: "Indonesia",
+      platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
+    });
+    expect(bad).toBe(false);
+  });
+
+  it("REJECTS a WebhookEventData payload missing the required can_reactivate flag (wire-parity)", () => {
+    // Reactivation added `can_reactivate` to the flattened OrderCapabilities the
+    // producer emits, so it is now `required` alongside the other 4 booleans. This
+    // payload is otherwise COMPLETE (it WOULD HAVE validated before the field
+    // existed) — its rejection is the proof the new field is wire-required, not optional.
+    const validate = harness.schemaValidator("WebhookEventData");
+    const bad = validate({
+      order_id: 90210,
+      phone_number: "+6281234567890",
+      otp_code: "123456",
+      otp_message: "Your code is 123456",
+      product_id: 1024,
+      catalog_product_id: 88,
+      country: "Indonesia",
+      platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
+      can_finish: true,
+      can_resend: true,
+      can_cancel: false,
+      can_replace: false,
+      // can_reactivate dropped — a field the producer always emits.
+      resend_available_at: null,
+      cancel_available_at: null,
+      replace_available_at: null,
+    });
+    expect(bad).toBe(false);
+  });
+
+  it("REJECTS a WebhookEventData payload missing the required capability timestamps", () => {
+    // The producer (webhook_notifier::webhook_data_payload) ALWAYS emits the 3
+    // *_available_at keys (null when not set). They're now `required` too, so a
+    // payload with the booleans but no timestamps is drift. Operator fields
+    // present (non-null) so the ONLY missing thing is the timestamps.
+    const validate = harness.schemaValidator("WebhookEventData");
+    const bad = validate({
+      order_id: 90210,
+      phone_number: "+6281234567890",
+      otp_code: "123456",
+      otp_message: "Your code is 123456",
+      product_id: 1024,
+      catalog_product_id: 88,
+      country: "Indonesia",
+      platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
+      can_finish: true,
+      can_resend: true,
+      can_cancel: false,
+      can_replace: false,
+      can_reactivate: false,
+    });
+    expect(bad).toBe(false);
+  });
+
+  it("REJECTS a WebhookEventData payload missing one of the 6 always-emitted core fields (#394C R3)", () => {
+    // #394C R3: phone_number, otp_code, otp_message, catalog_product_id, country,
+    // platform are ALL emitted present-as-key for every event (Option<_> in the
+    // producer's OrderDetail → a JSON value or `null`, never an absent key), so
+    // they're now `required` (required-but-nullable) alongside operator + caps.
+    // This payload is complete EXCEPT it drops `country` — it WOULD HAVE validated
+    // under the pre-tightening schema (country optional), so its rejection is the
+    // proof the R3 tightening bites.
+    const validate = harness.schemaValidator("WebhookEventData");
+    const bad = validate({
+      order_id: 90210,
+      phone_number: "+6281234567890",
+      otp_code: "123456",
+      otp_message: "Your code is 123456",
+      product_id: 1024,
+      catalog_product_id: 88,
+      // country dropped — a present-as-key field the producer always emits.
+      platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
+      can_finish: true,
+      can_resend: true,
+      can_cancel: false,
+      can_replace: false,
+      can_reactivate: false,
+      resend_available_at: null,
+      cancel_available_at: null,
+      replace_available_at: null,
+    });
+    expect(bad).toBe(false);
+  });
+});
+
+// ───── published webhooks.orderEvent examples validate vs WebhookEvent (#394C R3) ─────
+// The `webhooks.orderEvent` request-body examples are the copy-paste payloads a
+// customer builds their webhook consumer against. `WebhookEventData` REQUIRES the
+// operator dimension (operator_id/operator_name) + the 7 capability fields, so an
+// example that stops at `platform` would NOT validate against the published
+// schema — a customer generating a strict consumer from that example would then
+// REJECT the real delivery. This reads each example straight from the OpenAPI doc
+// (not a hand-copied fixture) and validates it against `WebhookEvent` (which
+// `$ref`s `WebhookEventData`), so a future example that drifts from its own schema
+// fails HERE (offline, no token) instead of shipping stale to customers.
+describe("published webhooks.orderEvent examples validate vs WebhookEvent (#394C R3)", () => {
+  const yamlText = readFileSync(OPENAPI_PATH, "utf8");
+  const doc = yaml.load(yamlText, { schema: yaml.JSON_SCHEMA }) as {
+    webhooks?: Record<
+      string,
+      {
+        post?: {
+          requestBody?: {
+            content?: Record<
+              string,
+              { examples?: Record<string, { value?: unknown }> }
+            >;
+          };
+        };
+      }
+    >;
+  };
+  const harness = buildContractHarness(yamlText);
+
+  const examples =
+    doc.webhooks?.orderEvent?.post?.requestBody?.content?.["application/json"]
+      ?.examples ?? {};
+  const names = Object.keys(examples);
+
+  it("the doc actually carries orderEvent example(s) to guard", () => {
+    // Guard the guard: if the examples are moved/renamed away, fail loudly rather
+    // than validating nothing (an empty `for` loop would pass vacuously).
+    expect(names.length).toBeGreaterThan(0);
+  });
+
+  for (const name of names) {
+    it(`example '${name}' validates against WebhookEvent`, () => {
+      const validate = harness.schemaValidator("WebhookEvent");
+      const ok = validate(examples[name]!.value);
+      expect(ok, harness.formatErrors(validate)).toBe(true);
+    });
+  }
+});
+
+// ──────────── operator-selector coordinate contract (#394C M005) ────────────
+// The Rust `OperatorQuery` for `/v{1,2}/catalog/operators` takes NON-optional
+// `country_id` + `platform_id` (omitting either is a deserialize/422 error). The
+// OpenAPI spec must mark BOTH `required: true` so codegen'd clients — including
+// the committed `src/types.gen.ts` — surface them as required and can't omit a
+// coordinate that only fails at runtime. The products/services listings keep the
+// same coordinates OPTIONAL (absent → the `any`/all coordinate), so this locks
+// the ASYMMETRY, not a blanket flip. Paired with `check:types` (spec↔types
+// freshness), it transitively guarantees the generated types stay required.
+describe("operator selector requires both coordinates (#394C M005)", () => {
+  type SpecParam = { $ref?: string; name?: string; required?: boolean };
+  const doc = yaml.load(readFileSync(OPENAPI_PATH, "utf8"), {
+    schema: yaml.JSON_SCHEMA,
+  }) as {
+    paths: Record<string, Record<string, { parameters?: SpecParam[] }>>;
+    components: { parameters: Record<string, SpecParam> };
+  };
+
+  /** Resolve a GET operation's query param (following a `$ref`) by its `name`. */
+  function queryParam(path: string, name: string): SpecParam {
+    const params = doc.paths[path]?.get?.parameters ?? [];
+    for (const p of params) {
+      const resolved = p.$ref
+        ? doc.components.parameters[p.$ref.split("/").pop() as string]
+        : p;
+      if (resolved?.name === name) return resolved;
+    }
+    throw new Error(`no query param '${name}' on GET ${path}`);
+  }
+
+  for (const path of ["/v1/catalog/operators", "/v2/catalog/operators"]) {
+    it(`GET ${path} requires country_id AND platform_id`, () => {
+      expect(queryParam(path, "country_id").required).toBe(true);
+      expect(queryParam(path, "platform_id").required).toBe(true);
+    });
+  }
+
+  // Guard against over-correction: the product listing's coordinates stay OPTIONAL.
+  for (const path of ["/v1/catalog/products", "/v2/catalog/products"]) {
+    it(`GET ${path} keeps country_id/platform_id OPTIONAL`, () => {
+      expect(queryParam(path, "country_id").required ?? false).toBe(false);
+      expect(queryParam(path, "platform_id").required ?? false).toBe(false);
+    });
+  }
 });
 
 // ─────────────────── live API contract suite (gated) ───────────────────

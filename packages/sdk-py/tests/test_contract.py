@@ -69,6 +69,9 @@ def decode_operation(entry: Mapping[str, Any]) -> Any:
     decoders: dict[str, Callable[[], Any]] = {
         "v1.catalog.countries": lambda: V1CatalogResource(request).countries(),
         "v1.catalog.services": lambda: V1CatalogResource(request).services(country_id=7),
+        "v1.catalog.operators": lambda: V1CatalogResource(request).operators(
+            country_id=7, platform_id=1
+        ),
         "v1.catalog.products": lambda: V1CatalogResource(request).products(country_id=7),
         "v1.catalog.exchange_rate": lambda: V1CatalogResource(request).exchange_rate(),
         "v1.balance.get": lambda: V1BalanceResource(request).get(),
@@ -82,11 +85,18 @@ def decode_operation(entry: Mapping[str, Any]) -> Any:
         "v1.orders.cancel": lambda: V1OrdersResource(request).cancel(1),
         "v1.orders.finish": lambda: V1OrdersResource(request).finish(1),
         "v1.orders.resend": lambda: V1OrdersResource(request).resend(1),
+        "v1.orders.reactivate": lambda: V1OrdersResource(request).reactivate(
+            1, idempotency_key="stable-key"
+        ),
+        "v1.orders.reactivate_options": lambda: V1OrdersResource(request).reactivate_options(1),
         "v1.webhook.get": lambda: V1WebhookResource(request).get(),
         "v1.webhook.update": lambda: V1WebhookResource(request).update(webhook_url=""),
         "v1.webhook.test": lambda: V1WebhookResource(request).test(),
         "v2.catalog.countries": lambda: V2CatalogResource(request).countries(),
         "v2.catalog.services": lambda: V2CatalogResource(request).services(country_id=7),
+        "v2.catalog.operators": lambda: V2CatalogResource(request).operators(
+            country_id=7, platform_id=1
+        ),
         "v2.catalog.products": lambda: V2CatalogResource(request).products(country_id=7),
         "v2.catalog.exchange_rate": lambda: V2CatalogResource(request).exchange_rate(),
         "v2.balance.get": lambda: V2BalanceResource(request).get(),
@@ -100,6 +110,10 @@ def decode_operation(entry: Mapping[str, Any]) -> Any:
         "v2.orders.cancel": lambda: V2OrdersResource(request).cancel(1),
         "v2.orders.finish": lambda: V2OrdersResource(request).finish(1),
         "v2.orders.resend": lambda: V2OrdersResource(request).resend(1),
+        "v2.orders.reactivate": lambda: V2OrdersResource(request).reactivate(
+            1, idempotency_key="stable-key"
+        ),
+        "v2.orders.reactivate_options": lambda: V2OrdersResource(request).reactivate_options(1),
         "v2.webhook.get": lambda: V2WebhookResource(request).get(),
         "v2.webhook.update": lambda: V2WebhookResource(request).update(webhook_url=""),
         "v2.webhook.test": lambda: V2WebhookResource(request).test(),

@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/catalog/operators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List operators
+         * @description List the operators (carriers) with in-stock tiers for a (country, service). Prepended with a synthesized `any` entry (null `operator_id`) only when the any tiers also have stock. Empty ⇒ no operator choice (order the any tiers directly).
+         */
+        get: operations["v1ListOperators"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/catalog/exchange-rate": {
         parameters: {
             query?: never;
@@ -246,6 +266,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orders/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivate a number
+         * @description Re-order (buy another verification code on) a completed number that supports reactivation — order the SAME number again without re-renting a fresh one. Only a completed order whose number supports reactivation qualifies (check `can_reactivate` on the order first, or preview with `GET /v1/orders/{id}/reactivate-options`). The reactivated child is a new order and is returned in the SAME shape as `POST /v1/orders/create`; `amount` is the charged price in **IDR** minor units. The optional `max_price` is an **IDR** integer cost ceiling — reactivation is refused with `422 VALIDATION_ERROR` if the live cost exceeds it.
+         *
+         *     This is an idempotent write — send an `idempotency-key` header to make retries safe (a create and a reactivate can never collide on one key). Errors: `404 NOT_FOUND` (no such order, or it belongs to another account), `409 CONFLICT` (the number cannot be reactivated right now, or a reactivation for it is already settling), `409 INSUFFICIENT_BALANCE` (balance too low), `409 REQUEST_IN_PROGRESS` (a request with this key is still settling), `422 VALIDATION_ERROR` (the live cost exceeds `max_price`, or the key is malformed), `422 PROVIDER_ERROR` (the upstream provider rejected the reactivation), and `422 IDEMPOTENCY_KEY_REUSED` (key reused with a different body).
+         */
+        post: operations["v1ReactivateOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{id}/reactivate-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview reactivation cost
+         * @description Read-only quote for what `POST /v1/orders/reactivate` would charge right now, in **IDR** minor units. Consumes NO idempotency key and writes nothing. Available only for a completed order whose number supports reactivation. Errors: `404 NOT_FOUND` (no such order, or it belongs to another account), `409 CONFLICT` (the number cannot be reactivated), and `422 PROVIDER_ERROR` (the upstream availability probe failed).
+         */
+        get: operations["v1ReactivateOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v2/catalog/countries": {
         parameters: {
             query?: never;
@@ -298,6 +360,26 @@ export interface paths {
          * @description List orderable products with each IDR `price` projected to a USD money object (4-decimal precision). The response `meta` carries pagination **and** an `fx` rate receipt — the same rate used for every `price` in the page. Not cached, so the embedded rate is never stale. Returns `503 FX_RATE_UNAVAILABLE` if the USD/IDR rate cannot be sourced.
          */
         get: operations["v2ListProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/catalog/operators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List operators
+         * @description List the operators (carriers) with in-stock tiers for a (country, service). Prepended with a synthesized `any` entry (null `operator_id`) only when the any tiers also have stock. Empty ⇒ no operator choice (order the any tiers directly). Operators carry no money, so this response has no `meta.fx` — the schema is identical to `/v1`.
+         */
+        get: operations["v2ListOperators"];
         put?: never;
         post?: never;
         delete?: never;
@@ -482,6 +564,48 @@ export interface paths {
          * @description Ask the provider to resend the verification SMS. Identical to `POST /v1/orders/resend` — no money, so no money object and no `meta.fx`. Errors: `404 NOT_FOUND` (no such order) and `409 CONFLICT` (the order is not in a state that allows a resend).
          */
         post: operations["v2ResendOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/orders/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivate a number
+         * @description Re-order (buy another verification code on) a completed number that supports reactivation (USD-native). Identical to `POST /v1/orders/reactivate` except `max_price` is a **USD decimal string** (floor-converted to IDR at the boundary). Only a completed order whose number supports reactivation qualifies (check `can_reactivate`, or preview with `GET /v2/orders/{id}/reactivate-options`). The reactivated child is returned in the SAME shape as `POST /v2/orders/create`: `amount` is a USD money object (4-decimal) and the response carries an `meta.fx` receipt.
+         *
+         *     Idempotent — send an `idempotency-key` header to make retries safe (a create and a reactivate can never collide on one key). Errors: `404 NOT_FOUND` (no such order, or it belongs to another account), `409 CONFLICT` (the number cannot be reactivated right now, or a reactivation for it is already settling), `409 INSUFFICIENT_BALANCE` (balance too low), `409 REQUEST_IN_PROGRESS` (a request with this key is still settling), `422 VALIDATION_ERROR` (the live cost exceeds `max_price`, or the key is malformed), `422 PROVIDER_ERROR` (the upstream provider rejected the reactivation), `422 IDEMPOTENCY_KEY_REUSED` (key reused with a different body), and `503 FX_RATE_UNAVAILABLE` (the USD/IDR rate cannot be sourced — resolved before the ledger is touched, so no debit occurs).
+         */
+        post: operations["v2ReactivateOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/orders/{id}/reactivate-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview reactivation cost
+         * @description Read-only quote for what `POST /v2/orders/reactivate` would charge right now, as a USD money object (4-decimal) with an `meta.fx` receipt. Consumes NO idempotency key and writes nothing. Available only for a completed order whose number supports reactivation. Errors: `404 NOT_FOUND` (no such order, or it belongs to another account), `409 CONFLICT` (the number cannot be reactivated), `422 PROVIDER_ERROR` (the upstream availability probe failed), and `503 FX_RATE_UNAVAILABLE` (the USD/IDR rate cannot be sourced).
+         */
+        get: operations["v2ReactivateOptions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -750,19 +874,43 @@ export interface components {
             active: boolean;
         };
         /**
+         * V1Operator
+         * @description An operator (carrier) in a country, e.g. Telkomsel. Listed only when it has in-stock tiers. The synthesized `any` entry carries a null `operator_id`.
+         */
+        V1Operator: {
+            /**
+             * Format: int32
+             * @description Stable operator identifier. Pass it to `/catalog/products?operator_id=`. Null for the synthesized `any` coordinate.
+             * @example 42
+             */
+            operator_id: number | null;
+            /**
+             * @description Operator code (`any` for the synthesized wildcard).
+             * @example telkomsel
+             */
+            code: string;
+            /**
+             * @description Display name, when set.
+             * @example Telkomsel
+             */
+            name?: string | null;
+            /** @description Local-language display name, when set. */
+            local_name?: string | null;
+        };
+        /**
          * V1Product
          * @description An orderable product — a service in a country at a price. `price` is in **IDR** minor units (integer), the canonical ledger currency.
          */
         V1Product: {
             /**
              * Format: int32
-             * @description Stable product identifier. Pass it to the order-create endpoint.
+             * @description Stable SMSCode product (tier-slot) identifier. Orderable and stable across provider price and stock changes; `price` and `available` are mutable and update in place. A slot may become temporarily unavailable (`available` is 0) if its tier vanishes, and may later revive; it is never silently repointed to a different tier. This is one of two stable identities: `product_id` is the stable tier slot; `catalog_product_id` is the stable country-and-platform umbrella. For routed ordering (`max_price`, `prefer_provider`, `policy`, or a specific `operator_id`), pass `catalog_product_id` instead.
              * @example 1024
              */
             id: number;
             /**
-             * @description Human-readable product name, when set.
-             * @example WhatsApp Indonesia
+             * @description Stable `"{platform} - {country}"` label, for example `WhatsApp - Indonesia`; `null` when unset. It does not include the price. Read money from `price`. The label is fixed for the life of the slot and does not change when `price` or `available` change.
+             * @example WhatsApp - Indonesia
              */
             name?: string | null;
             /**
@@ -800,6 +948,17 @@ export interface components {
              * @example 88
              */
             catalog_product_id?: number | null;
+            /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name?: string | null;
         };
         /**
          * V1ExchangeRate
@@ -933,13 +1092,13 @@ export interface components {
         V2Product: {
             /**
              * Format: int32
-             * @description Stable product identifier. Pass it to the order-create endpoint.
+             * @description Stable SMSCode product (tier-slot) identifier. Orderable and stable across provider price and stock changes; `price` and `available` are mutable and update in place. A slot may become temporarily unavailable (`available` is 0) if its tier vanishes, and may later revive; it is never silently repointed to a different tier. This is one of two stable identities: `product_id` is the stable tier slot; `catalog_product_id` is the stable country-and-platform umbrella. For routed ordering (`max_price`, `prefer_provider`, `policy`, or a specific `operator_id`), pass `catalog_product_id` instead.
              * @example 1024
              */
             id: number;
             /**
-             * @description Human-readable product name, when set.
-             * @example WhatsApp Indonesia
+             * @description Stable `"{platform} - {country}"` label, for example `WhatsApp - Indonesia`; `null` when unset. It does not include the price. Read money from `price`. The label is fixed for the life of the slot and does not change when `price` or `available` change.
+             * @example WhatsApp - Indonesia
              */
             name?: string | null;
             /**
@@ -972,6 +1131,17 @@ export interface components {
              * @example 88
              */
             catalog_product_id?: number | null;
+            /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name?: string | null;
         };
         /**
          * V2ProductsMeta
@@ -1048,6 +1218,17 @@ export interface components {
              */
             catalog_product_id?: number | null;
             /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name?: string | null;
+            /**
              * @description The rented phone number, once assigned.
              * @example +6281234567890
              */
@@ -1094,6 +1275,8 @@ export interface components {
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
+            /** @description Server-authoritative: reactivation allowed (a completed order whose number supports reactivation). */
+            can_reactivate: boolean;
             /**
              * Format: date-time
              * @description When resend leaves cooldown; null when not in cooldown.
@@ -1157,6 +1340,8 @@ export interface components {
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
+            /** @description Server-authoritative: reactivation allowed (a completed order whose number supports reactivation). */
+            can_reactivate: boolean;
             /**
              * Format: date-time
              * @description When resend leaves cooldown; null when not in cooldown.
@@ -1196,12 +1381,21 @@ export interface components {
              * @example 800000
              */
             max_price?: number | null;
-            /**
-             * @description Routed-path soft provider preference (provider code, case-insensitive). Valid only with `catalog_product_id`.
-             * @example hero
-             */
+            /** @description Routed-path soft provider preference (provider code, case-insensitive). Valid only with `catalog_product_id`. */
             prefer_provider?: string | null;
             policy?: components["schemas"]["OrderPolicy"];
+            /**
+             * Format: int32
+             * @description Routed-path operator coordinate (`V1Operator.operator_id` from `/catalog/operators`) — order only this operator's tiers. Valid only with `catalog_product_id`.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * Format: int64
+             * @description Routed-path price floor in **IDR** minor units (integer): skip offers below this price. Valid only with `catalog_product_id`.
+             * @example 500000
+             */
+            min_price?: number | null;
             /**
              * Format: int32
              * @description How many numbers to order in one request (1–100).
@@ -1255,6 +1449,17 @@ export interface components {
              */
             catalog_product_id?: number | null;
             /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name?: string | null;
+            /**
              * Format: int64
              * @description The charged price in **IDR** minor units (integer).
              * @example 750000
@@ -1268,6 +1473,8 @@ export interface components {
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
+            /** @description Server-authoritative: reactivation allowed (a completed order whose number supports reactivation). */
+            can_reactivate: boolean;
             /**
              * Format: date-time
              * @description When resend leaves cooldown; null when not in cooldown.
@@ -1355,6 +1562,36 @@ export interface components {
             resent: boolean;
         };
         /**
+         * V1ReactivateRequest
+         * @description Body for `POST /v1/orders/reactivate`. `id` is the completed parent order to reactivate. The optional `max_price` is an **IDR** integer cost ceiling — reactivation is refused if the live cost exceeds it.
+         */
+        V1ReactivateRequest: {
+            /**
+             * Format: int32
+             * @description The completed parent order to reactivate.
+             * @example 90210
+             */
+            id: number;
+            /**
+             * Format: int64
+             * @description Optional cost ceiling in **IDR** minor units (integer). If the live reactivation cost exceeds it, the request is refused with `422 VALIDATION_ERROR`.
+             * @example 800000
+             */
+            max_price?: number | null;
+        };
+        /**
+         * V1ReactivateOptions
+         * @description The result of `GET /v1/orders/{id}/reactivate-options` — a read-only quote for the current reactivation cost in **IDR** minor units.
+         */
+        V1ReactivateOptions: {
+            /**
+             * Format: int64
+             * @description The current reactivation cost in **IDR** minor units (integer).
+             * @example 750000
+             */
+            cost: number;
+        };
+        /**
          * V2OrderSummary
          * @description Like `V1OrderSummary`, but `amount` is projected to a USD money object (4-decimal precision). All other fields are identical.
          */
@@ -1384,6 +1621,17 @@ export interface components {
              * @example 88
              */
             catalog_product_id?: number | null;
+            /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name?: string | null;
             /**
              * @description The rented phone number, once assigned.
              * @example +6281234567890
@@ -1426,6 +1674,8 @@ export interface components {
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
+            /** @description Server-authoritative: reactivation allowed (a completed order whose number supports reactivation). */
+            can_reactivate: boolean;
             /**
              * Format: date-time
              * @description When resend leaves cooldown; null when not in cooldown.
@@ -1464,12 +1714,20 @@ export interface components {
              * @example 0.50
              */
             max_price?: string | null;
-            /**
-             * @description Routed-path soft provider preference (provider code, case-insensitive). Valid only with `catalog_product_id`.
-             * @example hero
-             */
+            /** @description Routed-path soft provider preference (provider code, case-insensitive). Valid only with `catalog_product_id`. */
             prefer_provider?: string | null;
             policy?: components["schemas"]["OrderPolicy"];
+            /**
+             * Format: int32
+             * @description Routed-path operator coordinate (`V1Operator.operator_id` from `/catalog/operators`) — order only this operator's tiers. Valid only with `catalog_product_id`.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Routed-path price floor as a **USD decimal string** (e.g. `"0.30"`), ceil-converted to IDR at the boundary. Valid only with `catalog_product_id`. Parse/format as a decimal, never a float.
+             * @example 0.30
+             */
+            min_price?: string | null;
             /**
              * Format: int32
              * @description How many numbers to order in one request (1–100).
@@ -1522,6 +1780,17 @@ export interface components {
              * @example 88
              */
             catalog_product_id?: number | null;
+            /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id?: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name?: string | null;
             amount: components["schemas"]["V2Money"];
             /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
             can_finish: boolean;
@@ -1531,6 +1800,8 @@ export interface components {
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
+            /** @description Server-authoritative: reactivation allowed (a completed order whose number supports reactivation). */
+            can_reactivate: boolean;
             /**
              * Format: date-time
              * @description When resend leaves cooldown; null when not in cooldown.
@@ -1575,6 +1846,30 @@ export interface components {
             status: components["schemas"]["OrderStatusEnum"];
             refund_amount: components["schemas"]["V2Money"];
             new_balance: components["schemas"]["V2Money"];
+        };
+        /**
+         * V2ReactivateRequest
+         * @description Body for `POST /v2/orders/reactivate`. Identical to `V1ReactivateRequest` except `max_price` is a **USD decimal string** (floor-converted to IDR at the boundary) instead of an IDR integer. `id` is the completed parent order to reactivate.
+         */
+        V2ReactivateRequest: {
+            /**
+             * Format: int32
+             * @description The completed parent order to reactivate.
+             * @example 90210
+             */
+            id: number;
+            /**
+             * @description Optional cost ceiling as a **USD decimal string** (e.g. `"0.50"`), floor-converted to IDR at the boundary. If the live reactivation cost exceeds it, the request is refused with `422 VALIDATION_ERROR`. Parse and format as a decimal, never a float.
+             * @example 0.50
+             */
+            max_price?: string | null;
+        };
+        /**
+         * V2ReactivateOptions
+         * @description The result of `GET /v2/orders/{id}/reactivate-options` — a read-only quote for the current reactivation cost as a USD money object (4-decimal), carried with an `meta.fx` receipt.
+         */
+        V2ReactivateOptions: {
+            cost: components["schemas"]["V2Money"];
         };
         /**
          * V1OrderIdRequest
@@ -1684,17 +1979,17 @@ export interface components {
              * @description The rented phone number, when assigned.
              * @example +6281234567890
              */
-            phone_number?: string | null;
+            phone_number: string | null;
             /**
              * @description The parsed verification code. Present on `order.otp_received`; `null` otherwise (or when not yet parsed).
              * @example 123456
              */
-            otp_code?: string | null;
+            otp_code: string | null;
             /**
              * @description The full received SMS text, when available.
              * @example Your code is 123456
              */
-            otp_message?: string | null;
+            otp_message: string | null;
             /**
              * Format: int32
              * @description The product (tier) id of the order.
@@ -1706,17 +2001,28 @@ export interface components {
              * @description The stable catalog id the order is linked to, when set.
              * @example 88
              */
-            catalog_product_id?: number | null;
+            catalog_product_id: number | null;
             /**
              * @description The country name of the order's product, when known.
              * @example Indonesia
              */
-            country?: string | null;
+            country: string | null;
             /**
              * @description The service/platform name of the order's product, when known.
              * @example WhatsApp
              */
-            platform?: string | null;
+            platform: string | null;
+            /**
+             * Format: int32
+             * @description The operator (carrier) id of the order's product; `null` for an `any`-operator order. Always present as a key (the producer emits it for every order — a JSON `null` for `any` orders).
+             * @example 42
+             */
+            operator_id: number | null;
+            /**
+             * @description The operator (carrier) display name; `null` for an `any`-operator order. Always present as a key alongside `operator_id`.
+             * @example Telkomsel
+             */
+            operator_name: string | null;
             /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
             can_finish: boolean;
             /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
@@ -1725,6 +2031,8 @@ export interface components {
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
+            /** @description Server-authoritative: reactivation allowed (a completed order whose number supports reactivation). */
+            can_reactivate: boolean;
             /**
              * Format: date-time
              * @description When resend leaves cooldown; null when not in cooldown.
@@ -1851,6 +2159,12 @@ export interface components {
         CountryIdQuery: number;
         /** @description Filter by service/platform (`V1Service.id`). */
         PlatformIdQuery: number;
+        /** @description The country (`V1Country.id`) to scope operators to. **Required** — the operator dimension is only defined for a specific (country, service) pair; omitting it is a 422. */
+        OperatorCountryIdQuery: number;
+        /** @description The service/platform (`V1Service.id`) to scope operators to. **Required** — the operator dimension is only defined for a specific (country, service) pair; omitting it is a 422. */
+        OperatorPlatformIdQuery: number;
+        /** @description Filter products to a specific operator (`V1Operator.operator_id` from `/catalog/operators`). Absent → the `any` coordinate (no operator filter). */
+        OperatorIdQuery: number;
         /** @description Maximum number of items per page. Clamped server-side to the range 1–10000; defaults to 1000. */
         LimitQuery: number;
         /** @description 1-based page number. Defaults to 1. */
@@ -1941,6 +2255,8 @@ export interface operations {
                 country_id?: components["parameters"]["CountryIdQuery"];
                 /** @description Filter by service/platform (`V1Service.id`). */
                 platform_id?: components["parameters"]["PlatformIdQuery"];
+                /** @description Filter products to a specific operator (`V1Operator.operator_id` from `/catalog/operators`). Absent → the `any` coordinate (no operator filter). */
+                operator_id?: components["parameters"]["OperatorIdQuery"];
                 /** @description Maximum number of items per page. Clamped server-side to the range 1–10000; defaults to 1000. */
                 limit?: components["parameters"]["LimitQuery"];
                 /** @description 1-based page number. Defaults to 1. */
@@ -1963,6 +2279,38 @@ export interface operations {
                     "application/json": components["schemas"]["SuccessEnvelope"] & {
                         data?: components["schemas"]["V1Product"][];
                         meta: components["schemas"]["PaginationMeta"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    v1ListOperators: {
+        parameters: {
+            query: {
+                /** @description The country (`V1Country.id`) to scope operators to. **Required** — the operator dimension is only defined for a specific (country, service) pair; omitting it is a 422. */
+                country_id: components["parameters"]["OperatorCountryIdQuery"];
+                /** @description The service/platform (`V1Service.id`) to scope operators to. **Required** — the operator dimension is only defined for a specific (country, service) pair; omitting it is a 422. */
+                platform_id: components["parameters"]["OperatorPlatformIdQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The in-stock operators (+ the conditional `any`). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"] & {
+                        data?: components["schemas"]["V1Operator"][];
                     };
                 };
             };
@@ -2253,6 +2601,74 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    v1ReactivateOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional idempotency key so a retried write is applied at most once. Reuse the SAME key (and an identical request body) to safely retry. A retry with a different body is rejected with `422 IDEMPOTENCY_KEY_REUSED`; a retry while the original is still settling returns `409 REQUEST_IN_PROGRESS`. Omit it and the server generates one per request (no cross-request deduplication). */
+                "idempotency-key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["V1ReactivateRequest"];
+            };
+        };
+        responses: {
+            /** @description The reactivated child order (same shape as create). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"] & {
+                        data?: components["schemas"]["V1CreateOrderResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    v1ReactivateOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The order identifier. */
+                id: components["parameters"]["OrderIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reactivation cost preview (IDR). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"] & {
+                        data?: components["schemas"]["V1ReactivateOptions"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     v2ListCountries: {
         parameters: {
             query?: never;
@@ -2316,6 +2732,8 @@ export interface operations {
                 country_id?: components["parameters"]["CountryIdQuery"];
                 /** @description Filter by service/platform (`V1Service.id`). */
                 platform_id?: components["parameters"]["PlatformIdQuery"];
+                /** @description Filter products to a specific operator (`V1Operator.operator_id` from `/catalog/operators`). Absent → the `any` coordinate (no operator filter). */
+                operator_id?: components["parameters"]["OperatorIdQuery"];
                 /** @description Maximum number of items per page. Clamped server-side to the range 1–10000; defaults to 1000. */
                 limit?: components["parameters"]["LimitQuery"];
                 /** @description 1-based page number. Defaults to 1. */
@@ -2338,6 +2756,38 @@ export interface operations {
                     "application/json": components["schemas"]["SuccessEnvelope"] & {
                         data?: components["schemas"]["V2Product"][];
                         meta: components["schemas"]["V2ProductsMeta"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    v2ListOperators: {
+        parameters: {
+            query: {
+                /** @description The country (`V1Country.id`) to scope operators to. **Required** — the operator dimension is only defined for a specific (country, service) pair; omitting it is a 422. */
+                country_id: components["parameters"]["OperatorCountryIdQuery"];
+                /** @description The service/platform (`V1Service.id`) to scope operators to. **Required** — the operator dimension is only defined for a specific (country, service) pair; omitting it is a 422. */
+                platform_id: components["parameters"]["OperatorPlatformIdQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The in-stock operators (+ the conditional `any`). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"] & {
+                        data?: components["schemas"]["V1Operator"][];
                     };
                 };
             };
@@ -2620,6 +3070,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SuccessEnvelope"] & {
                         data?: components["schemas"]["V1ResendResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    v2ReactivateOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional idempotency key so a retried write is applied at most once. Reuse the SAME key (and an identical request body) to safely retry. A retry with a different body is rejected with `422 IDEMPOTENCY_KEY_REUSED`; a retry while the original is still settling returns `409 REQUEST_IN_PROGRESS`. Omit it and the server generates one per request (no cross-request deduplication). */
+                "idempotency-key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["V2ReactivateRequest"];
+            };
+        };
+        responses: {
+            /** @description The reactivated child order (same shape as create), USD-projected. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"] & {
+                        data?: components["schemas"]["V2CreateOrderResult"];
+                        meta: components["schemas"]["V2Meta"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    v2ReactivateOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The order identifier. */
+                id: components["parameters"]["OrderIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reactivation cost preview (USD), with an FX receipt. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"] & {
+                        data?: components["schemas"]["V2ReactivateOptions"];
+                        meta: components["schemas"]["V2Meta"];
                     };
                 };
             };

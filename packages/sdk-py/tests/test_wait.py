@@ -40,6 +40,7 @@ def test_order_model_otp_resolves() -> None:
             can_resend=True,
             can_cancel=False,
             can_replace=False,
+            can_reactivate=False,
         ),
     )
 

@@ -200,6 +200,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CountryIdQuery'
         - $ref: '#/components/parameters/PlatformIdQuery'
+        - $ref: '#/components/parameters/OperatorIdQuery'
         - $ref: '#/components/parameters/LimitQuery'
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/SortQuery'
@@ -226,7 +227,7 @@ paths:
                     success: true
                     data:
                       - id: 1024
-                        name: WhatsApp Indonesia
+                        name: WhatsApp - Indonesia
                         country_id: 7
                         platform_id: 1
                         available: 142
@@ -247,6 +248,39 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/catalog/operators:
+    get:
+      tags: [v1]
+      operationId: v1ListOperators
+      summary: List operators
+      description: >-
+        List the operators (carriers) with in-stock tiers for a (country,
+        service). Prepended with a synthesized `any` entry (null `operator_id`)
+        only when the any tiers also have stock. Empty ⇒ no operator choice
+        (order the any tiers directly).
+      parameters:
+        - $ref: '#/components/parameters/OperatorCountryIdQuery'
+        - $ref: '#/components/parameters/OperatorPlatformIdQuery'
+      responses:
+        '200':
+          description: The in-stock operators (+ the conditional `any`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Operator'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /v1/catalog/exchange-rate:
     get:
@@ -729,6 +763,142 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/orders/reactivate:
+    post:
+      tags: [v1]
+      operationId: v1ReactivateOrder
+      summary: Reactivate a number
+      description: >-
+        Re-order (buy another verification code on) a completed number that
+        supports reactivation — order the SAME number again without re-renting a
+        fresh one. Only a completed order whose number supports reactivation
+        qualifies (check `can_reactivate` on the order first, or preview with
+        `GET /v1/orders/{id}/reactivate-options`). The reactivated child is a new
+        order and is returned in the SAME shape as `POST /v1/orders/create`;
+        `amount` is the charged price in **IDR** minor units. The optional
+        `max_price` is an **IDR** integer cost ceiling — reactivation is refused
+        with `422 VALIDATION_ERROR` if the live cost exceeds it.
+
+
+        This is an idempotent write — send an `idempotency-key` header to make
+        retries safe (a create and a reactivate can never collide on one key).
+        Errors: `404 NOT_FOUND` (no such order, or it belongs to another
+        account), `409 CONFLICT` (the number cannot be reactivated right now, or
+        a reactivation for it is already settling), `409 INSUFFICIENT_BALANCE`
+        (balance too low), `409 REQUEST_IN_PROGRESS` (a request with this key is
+        still settling), `422 VALIDATION_ERROR` (the live cost exceeds
+        `max_price`, or the key is malformed), `422 PROVIDER_ERROR` (the upstream
+        provider rejected the reactivation), and `422 IDEMPOTENCY_KEY_REUSED`
+        (key reused with a different body).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1ReactivateRequest'
+            examples:
+              reactivate:
+                summary: Reactivate a completed number
+                value:
+                  id: 90210
+              guarded:
+                summary: Reactivate with an IDR price ceiling
+                value:
+                  id: 90210
+                  max_price: 800000
+      responses:
+        '200':
+          description: The reactivated child order (same shape as create).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1CreateOrderResult'
+              examples:
+                reactivated:
+                  value:
+                    success: true
+                    data:
+                      orders:
+                        - id: 90244
+                          status: ACTIVE
+                          phone_number: '+6281234567890'
+                          otp_code: null
+                          otp_received_at: null
+                          expires_at: '2026-05-11T10:20:00+00:00'
+                          failed_reason: null
+                          product_id: 1024
+                          catalog_product_id: 88
+                          amount: 750000
+                      failed_count: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/orders/{id}/reactivate-options:
+    get:
+      tags: [v1]
+      operationId: v1ReactivateOptions
+      summary: Preview reactivation cost
+      description: >-
+        Read-only quote for what `POST /v1/orders/reactivate` would charge right
+        now, in **IDR** minor units. Consumes NO idempotency key and writes
+        nothing. Available only for a completed order whose number supports
+        reactivation. Errors: `404 NOT_FOUND` (no such order, or it belongs to
+        another account), `409 CONFLICT` (the number cannot be reactivated), and
+        `422 PROVIDER_ERROR` (the upstream availability probe failed).
+      parameters:
+        - $ref: '#/components/parameters/OrderIdPath'
+      responses:
+        '200':
+          description: The reactivation cost preview (IDR).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V1ReactivateOptions'
+              examples:
+                preview:
+                  value:
+                    success: true
+                    data:
+                      cost: 750000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   # ───────────────────────── /v2 — USD-native ─────────────────────────
   /v2/catalog/countries:
     get:
@@ -831,6 +1001,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CountryIdQuery'
         - $ref: '#/components/parameters/PlatformIdQuery'
+        - $ref: '#/components/parameters/OperatorIdQuery'
         - $ref: '#/components/parameters/LimitQuery'
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/SortQuery'
@@ -857,7 +1028,7 @@ paths:
                     success: true
                     data:
                       - id: 1024
-                        name: WhatsApp Indonesia
+                        name: WhatsApp - Indonesia
                         country_id: 7
                         platform_id: 1
                         available: 142
@@ -886,6 +1057,40 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/catalog/operators:
+    get:
+      tags: [v2]
+      operationId: v2ListOperators
+      summary: List operators
+      description: >-
+        List the operators (carriers) with in-stock tiers for a (country,
+        service). Prepended with a synthesized `any` entry (null `operator_id`)
+        only when the any tiers also have stock. Empty ⇒ no operator choice
+        (order the any tiers directly). Operators carry no money, so this
+        response has no `meta.fx` — the schema is identical to `/v1`.
+      parameters:
+        - $ref: '#/components/parameters/OperatorCountryIdQuery'
+        - $ref: '#/components/parameters/OperatorPlatformIdQuery'
+      responses:
+        '200':
+          description: The in-stock operators (+ the conditional `any`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/V1Operator'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /v2/catalog/exchange-rate:
     get:
@@ -1444,6 +1649,170 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v2/orders/reactivate:
+    post:
+      tags: [v2]
+      operationId: v2ReactivateOrder
+      summary: Reactivate a number
+      description: >-
+        Re-order (buy another verification code on) a completed number that
+        supports reactivation (USD-native). Identical to
+        `POST /v1/orders/reactivate` except `max_price` is a **USD decimal
+        string** (floor-converted to IDR at the boundary). Only a completed order
+        whose number supports reactivation qualifies (check `can_reactivate`, or
+        preview with `GET /v2/orders/{id}/reactivate-options`). The reactivated
+        child is returned in the SAME shape as `POST /v2/orders/create`: `amount`
+        is a USD money object (4-decimal) and the response carries an `meta.fx`
+        receipt.
+
+
+        Idempotent — send an `idempotency-key` header to make retries safe (a
+        create and a reactivate can never collide on one key). Errors:
+        `404 NOT_FOUND` (no such order, or it belongs to another account),
+        `409 CONFLICT` (the number cannot be reactivated right now, or a
+        reactivation for it is already settling), `409 INSUFFICIENT_BALANCE`
+        (balance too low), `409 REQUEST_IN_PROGRESS` (a request with this key is
+        still settling), `422 VALIDATION_ERROR` (the live cost exceeds
+        `max_price`, or the key is malformed), `422 PROVIDER_ERROR` (the upstream
+        provider rejected the reactivation), `422 IDEMPOTENCY_KEY_REUSED` (key
+        reused with a different body), and `503 FX_RATE_UNAVAILABLE` (the USD/IDR
+        rate cannot be sourced — resolved before the ledger is touched, so no
+        debit occurs).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V2ReactivateRequest'
+            examples:
+              reactivate:
+                summary: Reactivate a completed number
+                value:
+                  id: 90210
+              guarded:
+                summary: Reactivate with a USD price ceiling
+                value:
+                  id: 90210
+                  max_price: '0.50'
+      responses:
+        '200':
+          description: The reactivated child order (same shape as create), USD-projected.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2CreateOrderResult'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                reactivated:
+                  value:
+                    success: true
+                    data:
+                      orders:
+                        - id: 90244
+                          status: ACTIVE
+                          phone_number: '+6281234567890'
+                          otp_code: null
+                          otp_received_at: null
+                          expires_at: '2026-05-11T10:20:00+00:00'
+                          failed_reason: null
+                          product_id: 1024
+                          catalog_product_id: 88
+                          amount:
+                            amount: '46.8750'
+                            currency: USD
+                            canonical_amount: 750000
+                            canonical_currency: IDR
+                      failed_count: 0
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v2/orders/{id}/reactivate-options:
+    get:
+      tags: [v2]
+      operationId: v2ReactivateOptions
+      summary: Preview reactivation cost
+      description: >-
+        Read-only quote for what `POST /v2/orders/reactivate` would charge right
+        now, as a USD money object (4-decimal) with an `meta.fx` receipt.
+        Consumes NO idempotency key and writes nothing. Available only for a
+        completed order whose number supports reactivation. Errors:
+        `404 NOT_FOUND` (no such order, or it belongs to another account),
+        `409 CONFLICT` (the number cannot be reactivated), `422 PROVIDER_ERROR`
+        (the upstream availability probe failed), and `503 FX_RATE_UNAVAILABLE`
+        (the USD/IDR rate cannot be sourced).
+      parameters:
+        - $ref: '#/components/parameters/OrderIdPath'
+      responses:
+        '200':
+          description: The reactivation cost preview (USD), with an FX receipt.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/V2ReactivateOptions'
+                      meta:
+                        $ref: '#/components/schemas/V2Meta'
+              examples:
+                preview:
+                  value:
+                    success: true
+                    data:
+                      cost:
+                        amount: '46.8750'
+                        currency: USD
+                        canonical_amount: 750000
+                        canonical_currency: IDR
+                    meta:
+                      fx:
+                        pair: USD/IDR
+                        rate: 16000
+                        rate_as_of: '2026-05-11T09:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   # ───────────────────── /v1 + /v2 — webhook config ─────────────────────
   # Webhook config carries NO money, so the /v2 operations reuse the v1
   # handlers verbatim — responses are byte-identical (no `meta`, no `fx`).
@@ -1781,7 +2150,7 @@ webhooks:
               $ref: '#/components/schemas/WebhookEvent'
             examples:
               otp_received:
-                summary: order.otp_received
+                summary: order.otp_received (operator-routed order)
                 value:
                   event: order.otp_received
                   timestamp: '2026-05-11T09:05:00+00:00'
@@ -1794,8 +2163,18 @@ webhooks:
                     catalog_product_id: 88
                     country: Indonesia
                     platform: WhatsApp
+                    operator_id: 42
+                    operator_name: Telkomsel
+                    can_finish: true
+                    can_resend: true
+                    can_cancel: false
+                    can_replace: false
+                    can_reactivate: false
+                    resend_available_at: null
+                    cancel_available_at: null
+                    replace_available_at: null
               completed:
-                summary: order.completed
+                summary: order.completed (operator-routed order, terminal)
                 value:
                   event: order.completed
                   timestamp: '2026-05-11T09:10:00+00:00'
@@ -1808,8 +2187,18 @@ webhooks:
                     catalog_product_id: 88
                     country: Indonesia
                     platform: WhatsApp
+                    operator_id: 42
+                    operator_name: Telkomsel
+                    can_finish: false
+                    can_resend: false
+                    can_cancel: false
+                    can_replace: false
+                    can_reactivate: false
+                    resend_available_at: null
+                    cancel_available_at: null
+                    replace_available_at: null
               canceled:
-                summary: order.canceled
+                summary: order.canceled (any-operator order, terminal + refunded)
                 value:
                   event: order.canceled
                   timestamp: '2026-05-11T09:08:00+00:00'
@@ -1822,6 +2211,16 @@ webhooks:
                     catalog_product_id: 88
                     country: Indonesia
                     platform: WhatsApp
+                    operator_id: null
+                    operator_name: null
+                    can_finish: false
+                    can_resend: false
+                    can_cancel: false
+                    can_replace: false
+                    can_reactivate: false
+                    resend_available_at: null
+                    cancel_available_at: null
+                    replace_available_at: null
       responses:
         '200':
           description: >-
@@ -2050,6 +2449,30 @@ components:
           description: Whether the service is currently active in the catalog.
           examples: [true]
 
+    V1Operator:
+      type: object
+      title: V1Operator
+      description: An operator (carrier) in a country, e.g. Telkomsel. Listed only when it has in-stock tiers. The synthesized `any` entry carries a null `operator_id`.
+      required: [operator_id, code]
+      additionalProperties: false
+      properties:
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: Stable operator identifier. Pass it to `/catalog/products?operator_id=`. Null for the synthesized `any` coordinate.
+          examples: [42]
+        code:
+          type: string
+          description: Operator code (`any` for the synthesized wildcard).
+          examples: [telkomsel]
+        name:
+          type: [string, 'null']
+          description: Display name, when set.
+          examples: [Telkomsel]
+        local_name:
+          type: [string, 'null']
+          description: Local-language display name, when set.
+
     V1Product:
       type: object
       title: V1Product
@@ -2062,12 +2485,22 @@ components:
         id:
           type: integer
           format: int32
-          description: Stable product identifier. Pass it to the order-create endpoint.
+          description: >-
+            Stable SMSCode product (tier-slot) identifier. Orderable and stable across provider
+            price and stock changes; `price` and `available` are mutable and update in place. A slot
+            may become temporarily unavailable (`available` is 0) if its tier vanishes, and may later
+            revive; it is never silently repointed to a different tier. This is one of two stable
+            identities: `product_id` is the stable tier slot; `catalog_product_id` is the stable
+            country-and-platform umbrella. For routed ordering (`max_price`, `prefer_provider`,
+            `policy`, or a specific `operator_id`), pass `catalog_product_id` instead.
           examples: [1024]
         name:
           type: [string, 'null']
-          description: Human-readable product name, when set.
-          examples: [WhatsApp Indonesia]
+          description: >-
+            Stable `"{platform} - {country}"` label, for example `WhatsApp - Indonesia`; `null` when
+            unset. It does not include the price. Read money from `price`. The label is fixed for the
+            life of the slot and does not change when `price` or `available` change.
+          examples: [WhatsApp - Indonesia]
         country_id:
           type: [integer, 'null']
           format: int32
@@ -2097,6 +2530,15 @@ components:
           format: int32
           description: Identifier of the underlying catalog product, when linked.
           examples: [88]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
 
     V1ExchangeRate:
       type: object
@@ -2250,12 +2692,22 @@ components:
         id:
           type: integer
           format: int32
-          description: Stable product identifier. Pass it to the order-create endpoint.
+          description: >-
+            Stable SMSCode product (tier-slot) identifier. Orderable and stable across provider
+            price and stock changes; `price` and `available` are mutable and update in place. A slot
+            may become temporarily unavailable (`available` is 0) if its tier vanishes, and may later
+            revive; it is never silently repointed to a different tier. This is one of two stable
+            identities: `product_id` is the stable tier slot; `catalog_product_id` is the stable
+            country-and-platform umbrella. For routed ordering (`max_price`, `prefer_provider`,
+            `policy`, or a specific `operator_id`), pass `catalog_product_id` instead.
           examples: [1024]
         name:
           type: [string, 'null']
-          description: Human-readable product name, when set.
-          examples: [WhatsApp Indonesia]
+          description: >-
+            Stable `"{platform} - {country}"` label, for example `WhatsApp - Indonesia`; `null` when
+            unset. It does not include the price. Read money from `price`. The label is fixed for the
+            life of the slot and does not change when `price` or `available` change.
+          examples: [WhatsApp - Indonesia]
         country_id:
           type: [integer, 'null']
           format: int32
@@ -2282,6 +2734,15 @@ components:
           format: int32
           description: Identifier of the underlying catalog product, when linked.
           examples: [88]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
 
     V2ProductsMeta:
       type: object
@@ -2359,7 +2820,7 @@ components:
       description: >-
         A single order as returned by the list and get-by-id endpoints.
         `amount` is the charged price in **IDR** minor units (integer).
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2388,6 +2849,15 @@ components:
             The stable catalog product the order belongs to, when linked
             (`null` for older orders predating catalog backfill).
           examples: [88]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
         phone_number:
           type: [string, 'null']
           description: The rented phone number, once assigned.
@@ -2432,6 +2902,9 @@ components:
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
+        can_reactivate:
+          type: boolean
+          description: "Server-authoritative: reactivation allowed (a completed order whose number supports reactivation)."
         resend_available_at:
           type: [string, 'null']
           format: date-time
@@ -2451,7 +2924,7 @@ components:
       description: >-
         A compact, money-free order status as returned by the active-orders
         endpoint (status and OTP fields only — no `amount`).
-      required: [id, status, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2495,6 +2968,9 @@ components:
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
+        can_reactivate:
+          type: boolean
+          description: "Server-authoritative: reactivation allowed (a completed order whose number supports reactivation)."
         resend_available_at:
           type: [string, 'null']
           format: date-time
@@ -2546,9 +3022,23 @@ components:
           description: >-
             Routed-path soft provider preference (provider code,
             case-insensitive). Valid only with `catalog_product_id`.
-          examples: [hero]
         policy:
           $ref: '#/components/schemas/OrderPolicy'
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            Routed-path operator coordinate (`V1Operator.operator_id` from
+            `/catalog/operators`) — order only this operator's tiers. Valid only
+            with `catalog_product_id`.
+          examples: [42]
+        min_price:
+          type: [integer, 'null']
+          format: int64
+          description: >-
+            Routed-path price floor in **IDR** minor units (integer): skip offers
+            below this price. Valid only with `catalog_product_id`.
+          examples: [500000]
         quantity:
           type: integer
           format: int32
@@ -2565,7 +3055,7 @@ components:
         One created order in a `POST /v1/orders/create` result. `amount` is the
         charged price in **IDR** minor units. On a fresh create the OTP and
         failure fields are always `null`.
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2604,6 +3094,15 @@ components:
           format: int32
           description: The stable catalog id this order belongs to, when linked.
           examples: [88]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
         amount:
           type: integer
           format: int64
@@ -2621,6 +3120,9 @@ components:
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
+        can_reactivate:
+          type: boolean
+          description: "Server-authoritative: reactivation allowed (a completed order whose number supports reactivation)."
         resend_available_at:
           type: [string, 'null']
           format: date-time
@@ -2715,6 +3217,46 @@ components:
           description: Whether the resend request was accepted and dispatched.
           examples: [true]
 
+    V1ReactivateRequest:
+      type: object
+      title: V1ReactivateRequest
+      description: >-
+        Body for `POST /v1/orders/reactivate`. `id` is the completed parent order
+        to reactivate. The optional `max_price` is an **IDR** integer cost
+        ceiling — reactivation is refused if the live cost exceeds it.
+      required: [id]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: The completed parent order to reactivate.
+          examples: [90210]
+        max_price:
+          type: [integer, 'null']
+          format: int64
+          description: >-
+            Optional cost ceiling in **IDR** minor units (integer). If the live
+            reactivation cost exceeds it, the request is refused with
+            `422 VALIDATION_ERROR`.
+          examples: [800000]
+
+    V1ReactivateOptions:
+      type: object
+      title: V1ReactivateOptions
+      description: >-
+        The result of `GET /v1/orders/{id}/reactivate-options` — a read-only
+        quote for the current reactivation cost in **IDR** minor units.
+      required: [cost]
+      additionalProperties: false
+      properties:
+        cost:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The current reactivation cost in **IDR** minor units (integer).
+          examples: [750000]
+
     # ── /v2 order schemas (USD-native) ──
 
     V2OrderSummary:
@@ -2723,7 +3265,7 @@ components:
       description: >-
         Like `V1OrderSummary`, but `amount` is projected to a USD money object
         (4-decimal precision). All other fields are identical.
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2748,6 +3290,15 @@ components:
           format: int32
           description: The stable catalog id this order belongs to, when linked.
           examples: [88]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
         phone_number:
           type: [string, 'null']
           description: The rented phone number, once assigned.
@@ -2789,6 +3340,9 @@ components:
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
+        can_reactivate:
+          type: boolean
+          description: "Server-authoritative: reactivation allowed (a completed order whose number supports reactivation)."
         resend_available_at:
           type: [string, 'null']
           format: date-time
@@ -2839,9 +3393,23 @@ components:
           description: >-
             Routed-path soft provider preference (provider code,
             case-insensitive). Valid only with `catalog_product_id`.
-          examples: [hero]
         policy:
           $ref: '#/components/schemas/OrderPolicy'
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            Routed-path operator coordinate (`V1Operator.operator_id` from
+            `/catalog/operators`) — order only this operator's tiers. Valid only
+            with `catalog_product_id`.
+          examples: [42]
+        min_price:
+          type: [string, 'null']
+          description: >-
+            Routed-path price floor as a **USD decimal string** (e.g. `"0.30"`),
+            ceil-converted to IDR at the boundary. Valid only with
+            `catalog_product_id`. Parse/format as a decimal, never a float.
+          examples: ['0.30']
         quantity:
           type: integer
           format: int32
@@ -2858,7 +3426,7 @@ components:
         Like `V1CreateOrderItem`, but `amount` is a USD money object (4-decimal
         precision). On a fresh create the OTP and failure fields are always
         `null`.
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2897,6 +3465,15 @@ components:
           format: int32
           description: The stable catalog id this order belongs to, when linked.
           examples: [88]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
         amount:
           $ref: '#/components/schemas/V2Money'
         can_finish:
@@ -2911,6 +3488,9 @@ components:
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
+        can_reactivate:
+          type: boolean
+          description: "Server-authoritative: reactivation allowed (a completed order whose number supports reactivation)."
         resend_available_at:
           type: [string, 'null']
           format: date-time
@@ -2965,6 +3545,44 @@ components:
         refund_amount:
           $ref: '#/components/schemas/V2Money'
         new_balance:
+          $ref: '#/components/schemas/V2Money'
+
+    V2ReactivateRequest:
+      type: object
+      title: V2ReactivateRequest
+      description: >-
+        Body for `POST /v2/orders/reactivate`. Identical to `V1ReactivateRequest`
+        except `max_price` is a **USD decimal string** (floor-converted to IDR at
+        the boundary) instead of an IDR integer. `id` is the completed parent
+        order to reactivate.
+      required: [id]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: The completed parent order to reactivate.
+          examples: [90210]
+        max_price:
+          type: [string, 'null']
+          description: >-
+            Optional cost ceiling as a **USD decimal string** (e.g. `"0.50"`),
+            floor-converted to IDR at the boundary. If the live reactivation cost
+            exceeds it, the request is refused with `422 VALIDATION_ERROR`. Parse
+            and format as a decimal, never a float.
+          examples: ['0.50']
+
+    V2ReactivateOptions:
+      type: object
+      title: V2ReactivateOptions
+      description: >-
+        The result of `GET /v2/orders/{id}/reactivate-options` — a read-only
+        quote for the current reactivation cost as a USD money object
+        (4-decimal), carried with an `meta.fx` receipt.
+      required: [cost]
+      additionalProperties: false
+      properties:
+        cost:
           $ref: '#/components/schemas/V2Money'
 
     V1OrderIdRequest:
@@ -3119,7 +3737,14 @@ components:
       type: object
       title: WebhookEventData
       description: The order snapshot carried by an order webhook event.
-      required: [order_id, product_id, can_finish, can_resend, can_cancel, can_replace, resend_available_at, cancel_available_at, replace_available_at]
+      # Every field is `required`: the producer (webhook_notifier::webhook_data_payload)
+      # emits ALL keys present for EVERY event — non-null values or an explicit JSON
+      # `null` (never an absent key). `phone_number`, `otp_code`, `otp_message`,
+      # `catalog_product_id`, `country`, `platform` are required-but-nullable (Option<_>
+      # in the producer's OrderDetail), matching operator_id/operator_name + the
+      # *_available_at timestamps. So a consumer generated from this schema rejects a
+      # payload that DROPS any key, matching the runtime contract exactly.
+      required: [order_id, phone_number, otp_code, otp_message, product_id, catalog_product_id, country, platform, operator_id, operator_name, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         order_id:
@@ -3159,6 +3784,20 @@ components:
           type: [string, 'null']
           description: The service/platform name of the order's product, when known.
           examples: [WhatsApp]
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            The operator (carrier) id of the order's product; `null` for an
+            `any`-operator order. Always present as a key (the producer emits it
+            for every order — a JSON `null` for `any` orders).
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: >-
+            The operator (carrier) display name; `null` for an `any`-operator
+            order. Always present as a key alongside `operator_id`.
+          examples: [Telkomsel]
         can_finish:
           type: boolean
           description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
@@ -3171,6 +3810,9 @@ components:
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
+        can_reactivate:
+          type: boolean
+          description: "Server-authoritative: reactivation allowed (a completed order whose number supports reactivation)."
         resend_available_at:
           type: [string, 'null']
           format: date-time
@@ -3238,6 +3880,41 @@ components:
       examples:
         whatsapp:
           value: 1
+    OperatorCountryIdQuery:
+      name: country_id
+      in: query
+      required: true
+      description: >-
+        The country (`V1Country.id`) to scope operators to. **Required** — the
+        operator dimension is only defined for a specific (country, service)
+        pair; omitting it is a 422.
+      schema:
+        type: integer
+        format: int32
+      examples:
+        indonesia:
+          value: 6
+    OperatorPlatformIdQuery:
+      name: platform_id
+      in: query
+      required: true
+      description: >-
+        The service/platform (`V1Service.id`) to scope operators to.
+        **Required** — the operator dimension is only defined for a specific
+        (country, service) pair; omitting it is a 422.
+      schema:
+        type: integer
+        format: int32
+      examples:
+        whatsapp:
+          value: 1
+    OperatorIdQuery:
+      name: operator_id
+      in: query
+      required: false
+      description: Filter products to a specific operator (`V1Operator.operator_id` from `/catalog/operators`). Absent → the `any` coordinate (no operator filter).
+      schema: { type: integer, format: int32 }
+      examples: { telkomsel: { value: 42 } }
     LimitQuery:
       name: limit
       in: query

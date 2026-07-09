@@ -20,6 +20,8 @@ from smscode.models import (
     Order,
     OrderCapabilities,
     OrdersListV2,
+    ReactivateOptions,
+    ReactivateOptionsV2,
     ResendResult,
     V2Fx,
     parse_v2_fx,
@@ -43,7 +45,7 @@ T = TypeVar("T")
 AnyList = list[Any]
 OrderList = list[Order]
 CreatedOrderList = list[CreatedOrder]
-CAPABILITY_BOOL_FIELDS = ("can_finish", "can_resend", "can_cancel", "can_replace")
+CAPABILITY_BOOL_FIELDS = ("can_finish", "can_resend", "can_cancel", "can_replace", "can_reactivate")
 CAPABILITY_TIME_FIELDS = ("resend_available_at", "cancel_available_at", "replace_available_at")
 
 
@@ -63,6 +65,7 @@ def _capabilities(raw: Mapping[str, Any], *, label: str) -> OrderCapabilities:
         can_resend=raw["can_resend"],
         can_cancel=raw["can_cancel"],
         can_replace=raw["can_replace"],
+        can_reactivate=raw["can_reactivate"],
         resend_available_at=raw["resend_available_at"],
         cancel_available_at=raw["cancel_available_at"],
         replace_available_at=raw["replace_available_at"],
@@ -292,6 +295,30 @@ def _create_body(body: Mapping[str, Any] | None, params: Mapping[str, Any]) -> M
     return body if body is not None else dict(params)
 
 
+def _reactivate_body(order_id: int, max_price: object) -> dict[str, Any]:
+    # {id, max_price?} — max_price omitted entirely when None (v2 USD-decimal
+    # string / v1 IDR int). The server computes the react:-namespaced fingerprint.
+    body: dict[str, Any] = {"id": order_id}
+    if max_price is not None:
+        body["max_price"] = max_price
+    return body
+
+
+def _decode_v2_reactivate_options(result: ApiResult[Any]) -> ReactivateOptionsV2:
+    data = result.data
+    if not isinstance(data, Mapping):
+        raise InvalidResponseError("The /v2 reactivate-options response is malformed.")
+    fx = parse_v2_fx((result.meta or {}).get("fx"))
+    return ReactivateOptionsV2(cost=parse_money(data.get("cost")), fx=fx)
+
+
+def _decode_v1_reactivate_options(result: ApiResult[Any]) -> ReactivateOptions:
+    data = result.data
+    if not isinstance(data, Mapping) or type(data.get("cost")) is not int:
+        raise InvalidResponseError("The /v1 reactivate-options response is malformed.")
+    return ReactivateOptions(cost=data["cost"])
+
+
 class V2OrdersResource:
     def __init__(self, request: SyncRequest) -> None:
         self._request = request
@@ -350,6 +377,29 @@ class V2OrdersResource:
         return _decode_resend_result(
             _mutate_order(self._request, "/v2/orders/resend", order_id),
             label="/v2 resend",
+        )
+
+    def reactivate(
+        self,
+        order_id: int,
+        *,
+        max_price: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> CreateOrderResultV2:
+        # MONEY mutation mirroring create's idempotency contract. Returns the
+        # SAME create-result shape (the ONE reactivated child, amount → USD Money + fx).
+        return _create_with_idempotency(
+            self._request,
+            "/v2/orders/reactivate",
+            _reactivate_body(order_id, max_price),
+            idempotency_key=idempotency_key,
+            decode=_decode_v2_create_result,
+        )
+
+    def reactivate_options(self, order_id: int) -> ReactivateOptionsV2:
+        # read-only cost preview (NO idempotency key). cost → USD Money + fx.
+        return _decode_v2_reactivate_options(
+            self._request("GET", f"/v2/orders/{order_id}/reactivate-options")
         )
 
     def wait_for_otp(
@@ -434,6 +484,28 @@ class V1OrdersResource:
             label="/v1 resend",
         )
 
+    def reactivate(
+        self,
+        order_id: int,
+        *,
+        max_price: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> CreateOrderResultV1:
+        # MONEY mutation mirroring create's idempotency contract; IDR verbatim.
+        return _create_with_idempotency(
+            self._request,
+            "/v1/orders/reactivate",
+            _reactivate_body(order_id, max_price),
+            idempotency_key=idempotency_key,
+            decode=_decode_v1_create_result,
+        )
+
+    def reactivate_options(self, order_id: int) -> ReactivateOptions:
+        # read-only cost preview (NO idempotency key). IDR integer cost.
+        return _decode_v1_reactivate_options(
+            self._request("GET", f"/v1/orders/{order_id}/reactivate-options")
+        )
+
     def wait_for_otp(
         self,
         order_id: int,
@@ -514,6 +586,26 @@ class AsyncV2OrdersResource:
         return _decode_resend_result(
             await _async_mutate_order(self._request, "/v2/orders/resend", order_id),
             label="/v2 resend",
+        )
+
+    async def reactivate(
+        self,
+        order_id: int,
+        *,
+        max_price: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> CreateOrderResultV2:
+        return await _async_create_with_idempotency(
+            self._request,
+            "/v2/orders/reactivate",
+            _reactivate_body(order_id, max_price),
+            idempotency_key=idempotency_key,
+            decode=_decode_v2_create_result,
+        )
+
+    async def reactivate_options(self, order_id: int) -> ReactivateOptionsV2:
+        return _decode_v2_reactivate_options(
+            await self._request("GET", f"/v2/orders/{order_id}/reactivate-options")
         )
 
     async def wait_for_otp(
@@ -603,6 +695,26 @@ class AsyncV1OrdersResource:
         return _decode_resend_result(
             await _async_mutate_order(self._request, "/v1/orders/resend", order_id),
             label="/v1 resend",
+        )
+
+    async def reactivate(
+        self,
+        order_id: int,
+        *,
+        max_price: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> CreateOrderResultV1:
+        return await _async_create_with_idempotency(
+            self._request,
+            "/v1/orders/reactivate",
+            _reactivate_body(order_id, max_price),
+            idempotency_key=idempotency_key,
+            decode=_decode_v1_create_result,
+        )
+
+    async def reactivate_options(self, order_id: int) -> ReactivateOptions:
+        return _decode_v1_reactivate_options(
+            await self._request("GET", f"/v1/orders/{order_id}/reactivate-options")
         )
 
     async def wait_for_otp(

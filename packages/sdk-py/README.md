@@ -46,6 +46,31 @@ with client:
         client.orders.cancel(order_id)
 ```
 
+## Operator (carrier) selection
+
+Some countries expose per-operator (carrier) tiers (e.g. Telkomsel). `client.catalog.operators` lists the operators with stock for a `(country, service)`, plus a synthesized `any` (null `operator_id`) when the carrier-agnostic tiers also have stock — an empty list means there is no operator choice (order the `any` tiers directly). Pass `operator_id` to `catalog.products` (filter) and to `orders.create` on the routed path (with `catalog_product_id`). Products and orders carry `operator_id`/`operator_name`.
+
+```py
+with client:
+    operators = client.catalog.operators(country_id=7, platform_id=3)
+    op = next((o for o in operators if o.code == "telkomsel"), None)
+    if op is None or op.operator_id is None:
+        raise SystemExit("Telkomsel has no stock right now")
+
+    page = client.catalog.products(country_id=7, platform_id=3, operator_id=op.operator_id)
+    product = next((p for p in page.products if p.available > 0 and p.active), None)
+
+    # Routed order to that operator. operator_id / max_price / min_price are valid only with
+    # catalog_product_id (max_price/min_price are USD decimal strings on /v2, IDR integers on /v1).
+    created = client.orders.create({
+        "catalog_product_id": product.catalog_product_id,
+        "operator_id": op.operator_id,
+        "max_price": "0.50",
+    })
+    order = created.orders[0]
+    print("operator:", order["operator_name"], order["operator_id"])
+```
+
 ## Async client
 
 The async client has the same surface and uses `httpx.AsyncClient` internally.
@@ -86,6 +111,34 @@ client.orders.finish(order_id)
 
 If the provider sends the same digits again, code-based polling cannot
 distinguish it from the previous OTP.
+
+## Reactivate a completed number
+
+Some completed orders can be **reactivated** — re-order the SAME number for another
+code, without renting a fresh one. Check `can_reactivate` (server-authoritative),
+preview the cost, then reactivate. `reactivate` is money-sensitive with the same
+idempotency contract as `create`, and returns the same result shape (the one
+reactivated child order). `reactivate_options` is a read-only preview (no key, no
+charge): on `/v2` `cost` is a USD `Money`; on `/v1` it is an IDR integer.
+
+```py
+order = client.orders.get(order_id)
+if not order.capabilities.can_reactivate:
+    raise SystemExit("This order cannot be reactivated")
+
+# Read-only cost preview.
+preview = client.orders.reactivate_options(order_id)
+print("reactivation cost:", preview.cost.amount, "USD")
+
+# Reactivate. max_price (USD decimal string) caps the cost; the child is a NEW order.
+result = client.orders.reactivate(order_id, max_price="0.50")
+child = result.orders[0]
+print("reactivated as:", child["id"], "charged", child.amount.amount, "USD")
+
+# Then wait for the new OTP and finish, as in the quick start.
+otp = client.orders.wait_for_otp(int(child["id"]), timeout_ms=120_000)
+client.orders.finish(int(child["id"]))
+```
 
 ## Idempotent order create
 

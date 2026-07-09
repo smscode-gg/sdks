@@ -1,1 +1,1 @@
-{"success":true,"status":200,"data":[{"id":10,"name":"WhatsApp Indonesia","country_id":7,"platform_id":1,"available":42,"amount":139,"active":true,"catalog_product_id":88}],"meta":{"page":1,"limit":1000,"count":1}}
+{"success":true,"status":200,"data":[{"id":10,"name":"WhatsApp Indonesia","country_id":7,"platform_id":1,"available":42,"amount":139,"active":true,"catalog_product_id":88,"operator_id":42,"operator_name":"Telkomsel"}],"meta":{"page":1,"limit":1000,"count":1}}

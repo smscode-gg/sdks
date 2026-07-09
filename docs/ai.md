@@ -106,6 +106,41 @@ try {
 
 `max_price` units differ by version: `/v2` (`client.orders.create`) takes a **USD decimal string** (`"0.50"`); `/v1` (`client.v1.orders.create`) takes an **IDR integer**. `client.orders` is `/v2`; `client.v1.orders` is `/v1`.
 
+## Operator (carrier) selection
+
+Some countries expose per-operator (carrier) tiers (e.g. Telkomsel). List them with `client.catalog.operators`, then pass `operator_id` to `client.catalog.products` (filter) and `client.orders.create` (routed path — with `catalog_product_id`). `operator_id`/`operator_name` are echoed on every product and order. An empty operators list means there is no operator choice — order the `any` tiers directly.
+
+```ts
+// Operators with stock for (country, service). `operator_id` is null for the synthesized `any` entry.
+const operators = await client.catalog.operators({ country_id: 7, platform_id: 3 });
+const op = operators.find((o) => o.code === "telkomsel"); // undefined ⇒ that carrier has no stock
+
+const page = await client.catalog.products({ country_id: 7, platform_id: 3, operator_id: op?.operator_id });
+const product = page.products.find((p) => p.available > 0 && p.active);
+
+// Routed order to that operator. `operator_id`, `max_price`, and `min_price` are valid only with
+// `catalog_product_id`; `max_price`/`min_price` are USD decimal strings on `/v2`, IDR integers on `/v1`.
+const { orders } = await client.orders.create({
+  catalog_product_id: product.catalog_product_id,
+  operator_id: op?.operator_id,
+});
+```
+
+## Reactivate a completed number
+
+Some completed orders can be reactivated — re-order the SAME number for another code without renting a fresh one. Gate on the server-authoritative `can_reactivate`, preview the cost with `reactivateOptions` (read-only, no idempotency key, no charge), then `reactivate`. `reactivate` is a money mutation with the SAME idempotency contract as `create` (reuse `err.idempotencyKey` on a transient failure — never mint a new key) and returns the SAME shape as `create` (the one reactivated child order). On `/v2`, `reactivateOptions().cost` and the child `amount` are USD money objects; on `/v1` they are IDR integers.
+
+```ts
+const order = await client.orders.get(orderId);
+if (!order.can_reactivate) throw new Error("not reactivatable");
+
+const { cost } = await client.orders.reactivateOptions(orderId); // USD Money on /v2
+const { orders } = await client.orders.reactivate(orderId, { max_price: "0.50" });
+const child = orders[0]; // a NEW order — wait for its OTP, then finish
+```
+
+Python is the same lifecycle: `client.orders.get(order_id).capabilities.can_reactivate`, `client.orders.reactivate_options(order_id)`, then `client.orders.reactivate(order_id, max_price="0.50")`.
+
 ## Safe retry on a failed create
 
 Always reuse the SAME idempotency key on retry — minting a new one risks a double charge:

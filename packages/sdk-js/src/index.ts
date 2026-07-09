@@ -46,6 +46,7 @@ export type {
   ProductV2,
   ProductsPageV2,
   ProductsPageV1,
+  V1Operator,
 } from "./resources/catalog.js";
 export {
   V1BalanceResource,
@@ -65,6 +66,10 @@ export type {
   CreateOrderResultV1,
   CreateOrderResultV2,
   CancelResultV2,
+  ReactivateOrderOptionsV1,
+  ReactivateOrderOptionsV2,
+  ReactivateOptionsV1,
+  ReactivateOptionsV2,
   V1CreateOrderRequest,
   V2CreateOrderRequest,
   V1CreateOrderItem,
@@ -141,4 +146,4 @@ export type {
 export type { paths, components, operations, webhooks } from "./types.gen.js";
 
 /** SDK package version. Kept in sync with package.json `version`. */
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";

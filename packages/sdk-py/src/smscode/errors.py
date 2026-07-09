@@ -172,7 +172,6 @@ ERROR_BY_CODE: dict[str, type[SmscodeError]] = {
 
 STATUS_FALLBACK: dict[int, tuple[str, type[SmscodeError], str]] = {
     401: ("UNAUTHORIZED", UnauthorizedError, "Unauthorized"),
-    402: ("INSUFFICIENT_BALANCE", InsufficientBalanceError, "Insufficient balance"),
     403: ("FORBIDDEN", ForbiddenError, "Forbidden"),
     404: ("NOT_FOUND", NotFoundError, "Not found"),
     409: ("CONFLICT", ConflictError, "Conflict"),
