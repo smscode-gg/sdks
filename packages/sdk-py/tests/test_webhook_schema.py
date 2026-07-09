@@ -48,8 +48,7 @@ def _validator_for(schema_name: str) -> Draft202012Validator:
 
 def _errors(validator: Draft202012Validator, payload: Any) -> str:
     return "\n".join(
-        f"{list(e.path)}: {e.message}"
-        for e in sorted(validator.iter_errors(payload), key=str)
+        f"{list(e.path)}: {e.message}" for e in sorted(validator.iter_errors(payload), key=str)
     )
 
 

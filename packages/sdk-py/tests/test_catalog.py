@@ -296,6 +296,4 @@ def test_operators_requires_both_coordinates(resource: type) -> None:
         assert p.kind is inspect.Parameter.KEYWORD_ONLY, (
             f"{resource.__name__}.operators '{coord}' must be keyword-only"
         )
-        assert p.annotation is int, (
-            f"{resource.__name__}.operators '{coord}' must be annotated int"
-        )
+        assert p.annotation is int, f"{resource.__name__}.operators '{coord}' must be annotated int"
