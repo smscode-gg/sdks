@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smscode"
-version = "1.1.0"
+version = "1.2.0"
 description = "Official Python SDK for the SMSCode virtual number API."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -249,6 +249,44 @@ describe("waitForOtp — terminal status without an OTP", () => {
 });
 
 describe("waitForOtp — timeout", () => {
+  it("keeps polling when an SMS arrived without a classified code", async () => {
+    const calls: Captured[] = [];
+    const clock = fakeClock();
+    const client = new SmscodeClient({
+      token: "t",
+      fetch: routedFetch(
+        {
+          "/v1/orders/90210": [
+            v1OrderEnvelope({
+              id: 90210,
+              status: "OTP_RECEIVED",
+              otp_code: null,
+              otp_message: "Confirm via https://example.test/link",
+              can_cancel: false,
+            }),
+            v1OrderEnvelope({
+              id: 90210,
+              status: "OTP_RECEIVED",
+              otp_code: "123456",
+              can_cancel: false,
+            }),
+          ],
+        },
+        calls,
+      ),
+    });
+
+    const result = await client.orders.waitForOtp(90210, {
+      pollIntervalMs: 2000,
+      timeoutMs: 60_000,
+      sleep: clock.sleep,
+      now: clock.now,
+    });
+
+    expect(result.otpCode).toBe("123456");
+    expect(calls).toHaveLength(2);
+  });
+
   it("throws OtpTimeoutError when no OTP arrives before timeoutMs", async () => {
     const clock = fakeClock();
     const client = new SmscodeClient({
@@ -278,6 +316,36 @@ describe("waitForOtp — timeout", () => {
     expect(err.timeoutMs).toBe(10_000);
     // The injected clock never exceeded the budget by more than one interval.
     expect(clock.now()).toBeGreaterThanOrEqual(10_000);
+  });
+
+  it("times out on a delivered message-only SMS instead of treating it as a code", async () => {
+    const clock = fakeClock();
+    const client = new SmscodeClient({
+      token: "t",
+      fetch: routedFetch({
+        "/v1/orders/90210": v1OrderEnvelope({
+          id: 90210,
+          status: "OTP_RECEIVED",
+          otp_code: null,
+          otp_message: "Confirm via https://example.test/link",
+          sms_revision: 1,
+          can_finish: true,
+          can_cancel: false,
+        }),
+      }),
+    });
+
+    const err = (await client.orders
+      .waitForOtp(90210, {
+        pollIntervalMs: 2000,
+        timeoutMs: 4000,
+        sleep: clock.sleep,
+        now: clock.now,
+      })
+      .catch((error: unknown) => error)) as OtpTimeoutError;
+
+    expect(err).toBeInstanceOf(OtpTimeoutError);
+    expect(err.orderId).toBe(90210);
   });
 });
 
@@ -398,6 +466,49 @@ describe("waitForOtp — a non-transient error propagates (not swallowed)", () =
 });
 
 describe("waitForOtp — afterCode baseline (ignore the stale code after a resend)", () => {
+  it("resolves when sms_revision advances even if a no-code follow-up retains afterCode", async () => {
+    const calls: Captured[] = [];
+    const clock = fakeClock();
+    const client = new SmscodeClient({
+      token: "t",
+      fetch: routedFetch(
+        {
+          "/v1/orders/90210": [
+            v1OrderEnvelope({
+              id: 90210,
+              status: "OTP_RECEIVED",
+              otp_code: "111111",
+              otp_message: "Your code is 111111",
+              sms_revision: 7,
+            }),
+            v1OrderEnvelope({
+              id: 90210,
+              status: "OTP_RECEIVED",
+              otp_code: "111111",
+              otp_message: "Confirm at https://example.test/confirm",
+              sms_revision: 8,
+            }),
+          ],
+        },
+        calls,
+      ),
+    });
+
+    const result = await client.orders.waitForOtp(90210, {
+      afterCode: "111111",
+      afterRevision: 7,
+      pollIntervalMs: 2000,
+      timeoutMs: 60_000,
+      sleep: clock.sleep,
+      now: clock.now,
+    });
+
+    expect(result.otpCode).toBe("111111");
+    expect(result.order.otp_message).toBe("Confirm at https://example.test/confirm");
+    expect(result.order.sms_revision).toBe(8);
+    expect(calls).toHaveLength(2);
+  });
+
   it("ignores the preserved stale code === afterCode, resolves on a changed code", async () => {
     const calls: Captured[] = [];
     const clock = fakeClock();

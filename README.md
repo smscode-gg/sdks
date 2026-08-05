@@ -17,7 +17,7 @@
 
 - One public API contract for TypeScript/JavaScript and Python, validated against the same OpenAPI source.
 - Money-safe order creation with idempotency keys, typed errors, and retry behavior designed for paid API calls.
-- OTP lifecycle helpers for waiting, resending, finishing, canceling no-OTP orders, and verifying webhook signatures.
+- OTP lifecycle helpers for waiting, resending, finishing, capability-gated cancellation, and verifying webhook signatures.
 - `/v2` USD-native API by default, with the legacy `/v1` IDR API still available where needed.
 
 ## Packages
@@ -65,7 +65,9 @@ with SmscodeClient(token=os.environ["SMSCODE_TOKEN"]) as client:
 - Catalog lookup for countries, services, products, and exchange rates.
 - Balance reads on `/v2` and `/v1`.
 - Order create, list, get, cancel, finish, resend, and active-order lookup.
-- OTP polling with stale-code protection after resend (`afterCode` / `after_code`).
+- OTP polling with code and revision baselines after resend (`afterCode` +
+  `afterRevision` / `after_code` + `after_revision`).
+- Delivered text/link-only SMS is exposed as `otp_code=null` plus `otp_message`; after a wait timeout, re-read `can_finish`/`can_cancel` before acting.
 - Webhook get/update/test plus raw-body signature verification helpers.
 - Typed error classes for validation, auth, rate limit, timeout, terminal order, and money/idempotency failures.
 

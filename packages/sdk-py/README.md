@@ -42,9 +42,19 @@ with client:
         # Submit otp.otp_code in your target app here.
         client.orders.finish(order_id)
     except (OtpTimeoutError, OrderTerminalError):
-        # No OTP evidence arrived. Cancel remains available only in that case.
-        client.orders.cancel(order_id)
+        # A helper error is not proof that no SMS arrived. A no-code SMS has
+        # otp_message set and can_cancel=False, so re-read capabilities first.
+        current = client.v1.orders.get(order_id)
+        if current["can_finish"]:
+            print("SMS received:", current.get("otp_message") or "no classified code")
+            client.orders.finish(order_id)
+        elif current["can_cancel"]:
+            client.orders.cancel(order_id)
+        else:
+            print(f"Order {order_id} is {current['status']}; no automatic action taken")
 ```
+
+`wait_for_otp` waits for a classified code. Active-order reads and webhooks still expose a delivered SMS when `otp_code` is `None` and `otp_message` contains the exact message text. Rapid SMS webhook deliveries are unordered; compare `sms_revision` and ignore an older code/message pair.
 
 ## Operator (carrier) selection
 
@@ -87,11 +97,11 @@ async def main() -> None:
         print(balance.balance.amount, balance.balance.currency)
 ```
 
-## Resend and wait for a new OTP
+## Resend and wait for a new SMS
 
 `finish` does not require a new OTP after resend; the order is finishable once it
-has OTP evidence. If your integration needs to wait for a different post-resend
-code, pass the previous code as `after_code`.
+has SMS delivery evidence. To distinguish a new delivery from the preserved
+aggregate code, pass both the previous code and revision.
 
 ```py
 first = client.orders.wait_for_otp(order_id)
@@ -101,16 +111,19 @@ client.orders.resend(order_id)
 second = client.orders.wait_for_otp(
     order_id,
     after_code=first.otp_code,
+    after_revision=int(first.order["sms_revision"]),
     timeout_ms=120_000,
 )
 
-print("new OTP:", second.otp_code)
-# Submit second.otp_code in your target app here, then finish.
+print("latest SMS:", second.order.get("otp_message"))
+# second.otp_code can equal the old code after a text/link-only follow-up.
 client.orders.finish(order_id)
 ```
 
-If the provider sends the same digits again, code-based polling cannot
-distinguish it from the previous OTP.
+With only `after_code`, identical digits remain indistinguishable. With only
+`after_revision`, the helper waits for a strictly newer revision. A first-ever
+text/link-only SMS still has no aggregate code to return, so use the order's
+`otp_message` and server capabilities after the helper times out.
 
 ## Reactivate a completed number
 

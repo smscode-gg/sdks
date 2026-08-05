@@ -1,7 +1,7 @@
 /**
- * @smscode/sdk quickstart — create an order, wait for the OTP, USE it, then finish.
- * Cancel ONLY when no OTP arrives (once an OTP is received, cancel/refund is
- * closed — finish the order instead). In your app, import from "@smscode/sdk";
+ * @smscode/sdk quickstart — create an order, wait for an SMS, use its code when present, then finish.
+ * Cancel ONLY when no SMS is delivered. Any delivered SMS, including text or a
+ * link without a classified code, closes cancel/refund. In your app, import from "@smscode/sdk";
  * this in-repo example imports the local source so it type-checks in CI.
  * Read your token from the environment; never hardcode it.
  *   SMSCODE_TOKEN               your API token (Account Settings)
@@ -31,11 +31,22 @@ try {
   const { otpCode } = await client.orders.waitForOtp(order.id, { timeoutMs: 120_000 });
   console.log("OTP:", otpCode);
   // → submit `otpCode` in your target app here (the actual verification step).
-  // Once the code has been used, finish the order (refund is closed once an OTP arrives):
+  // Once the code has been used, finish the order (refund is closed once any SMS arrives):
   await client.orders.finish(order.id);
 } catch (err) {
   if (err instanceof OtpTimeoutError || err instanceof OrderTerminalError) {
-    await client.orders.cancel(order.id); // no OTP → cancel for a refund
-    console.log("no OTP — canceled for refund");
+    // A timeout proves only that no classified code was returned. Re-read the
+    // server capabilities: a delivered link/text SMS closes cancellation even
+    // when otp_code is null.
+    const latest = await client.v1.orders.get(order.id);
+    if (latest.can_finish) {
+      console.log("SMS received:", latest.otp_message ?? "no classified code");
+      await client.orders.finish(order.id);
+    } else if (latest.can_cancel) {
+      await client.orders.cancel(order.id);
+      console.log("no SMS delivered — canceled for refund");
+    } else {
+      console.log(`order ${order.id} is ${latest.status}; no automatic action taken`);
+    }
   } else throw err;
 }

@@ -520,12 +520,16 @@ export class V2OrdersResource {
   }
 
   /**
-   * Poll until the order's OTP arrives, then resolve `{ otpCode, status, order }`.
+   * Poll until a classified OTP code arrives, then resolve `{ otpCode, status, order }`.
    *
    * **Polls the FX-free `/v1/orders/{id}` path** (NOT `/v2`), so a `/v2` FX outage
-   * (`503 FX_RATE_UNAVAILABLE`) can never break OTP-waiting. Throws
-   * {@link OrderTerminalError} if the order goes terminal with no OTP, or
-   * {@link OtpTimeoutError} once `timeoutMs` elapses.
+   * (`503 FX_RATE_UNAVAILABLE`) can never break OTP-waiting. An order can be
+   * `OTP_RECEIVED` with a null `otp_code` when SMS delivery has no classified
+   * code; this helper keeps polling in that state. Throws {@link OrderTerminalError} if the order goes terminal with no
+   * classified code, or {@link OtpTimeoutError} once `timeoutMs` elapses.
+   * Neither error proves refund eligibility; check the latest `can_cancel`.
+   * After a resend, pair `afterCode` with `afterRevision` to observe a newer
+   * identical-code or text/link-only SMS snapshot.
    */
   waitForOtp(
     orderId: number,
@@ -665,11 +669,15 @@ export class V1OrdersResource {
   }
 
   /**
-   * Poll until the order's OTP arrives, then resolve `{ otpCode, status, order }`.
+   * Poll until a classified OTP code arrives, then resolve `{ otpCode, status, order }`.
    *
-   * Polls the FX-free `/v1/orders/{id}` path. Throws {@link OrderTerminalError} if
-   * the order goes terminal with no OTP, or {@link OtpTimeoutError} once `timeoutMs`
-   * elapses.
+   * Polls the FX-free `/v1/orders/{id}` path. An order can be `OTP_RECEIVED` with
+   * a null `otp_code` when SMS delivery has no classified code; this helper keeps polling in that state.
+   * Throws {@link OrderTerminalError} if the order goes terminal with no classified
+   * code, or {@link OtpTimeoutError} once `timeoutMs` elapses. Neither error proves
+   * refund eligibility; check the latest `can_cancel`.
+   * After a resend, pair `afterCode` with `afterRevision` to observe a newer
+   * identical-code or text/link-only SMS snapshot.
    */
   waitForOtp(
     orderId: number,

@@ -115,24 +115,33 @@ async function main(): Promise<void> {
     gotOtp = true;
   } catch (err) {
     if (err instanceof OtpTimeoutError || err instanceof OrderTerminalError) {
-      console.log(`[smoke] no OTP (${err.code}); will cancel for a refund.`);
+      console.log(`[smoke] no classified OTP (${err.code}); checking lifecycle capabilities.`);
     } else {
       fatal = err;
     }
   }
 
-  // 3) Lifecycle-correct cleanup: once an OTP has arrived, cancel/refund is CLOSED —
-  //    FINISH the order. CANCEL for a refund only when NO OTP arrived. Tolerate a
-  //    cleanup the order's lifecycle no longer permits.
+  // 3) Lifecycle-correct cleanup: any delivered SMS closes cancel/refund, even
+  //    when no OTP code was classified. Re-read the canonical capabilities
+  //    before choosing FINISH versus CANCEL; a wait-helper error alone does not
+  //    prove refund eligibility. Tolerate a lifecycle that permits neither.
   try {
     if (gotOtp) {
       await client.orders.finish(order.id);
       console.log(`[smoke] finished order ${order.id}.`);
     } else {
-      const result = await client.orders.cancel(order.id);
-      console.log(
-        `[smoke] canceled order ${result.order_id}; refunded ${result.refund_amount.amount} ${result.refund_amount.currency}`,
-      );
+      const latest = await client.v1.orders.get(order.id);
+      if (latest.can_finish) {
+        await client.orders.finish(order.id);
+        console.log(`[smoke] finished delivered order ${order.id}.`);
+      } else if (latest.can_cancel) {
+        const result = await client.orders.cancel(order.id);
+        console.log(
+          `[smoke] canceled order ${result.order_id}; refunded ${result.refund_amount.amount} ${result.refund_amount.currency}`,
+        );
+      } else {
+        console.log(`[smoke] cleanup skipped: order ${order.id} has no permitted action.`);
+      }
     }
   } catch (err) {
     if (err instanceof SmscodeError) {

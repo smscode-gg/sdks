@@ -45,6 +45,21 @@ def test_parse_webhook_event_uses_event_discriminant() -> None:
         parse_webhook_event({"type": "order.otp_received", "data": {}})
 
 
+def test_parse_webhook_event_preserves_no_code_sms_pair() -> None:
+    message = "Confirm your login: https://example.com/confirm"
+    raw = json.dumps(
+        {
+            "event": "order.otp_received",
+            "data": {"otp_code": None, "otp_message": message},
+        }
+    )
+
+    event = parse_webhook_event(raw)
+
+    assert event["data"]["otp_code"] is None
+    assert event["data"]["otp_message"] == message
+
+
 def test_webhook_resources_hit_v2_and_v1_paths() -> None:
     config = {
         "webhook_url": "https://example.com/hooks/smscode",

@@ -46,7 +46,7 @@ The examples below read configuration from the environment — no secrets in sou
 
 ## Example 1 — Create a WhatsApp/Indonesia order, then wait for the OTP
 
-`client.orders.create` resolves an idempotency key up front and returns it on the result. `max_price` on `/v2` is a **USD decimal string** (floor-converted to IDR server-side). `waitForOtp` polls the FX-free `/v1` status, so a `/v2` FX outage can never break OTP-waiting.
+`client.orders.create` resolves an idempotency key up front and returns it on the result. `max_price` on `/v2` is a **USD decimal string** (floor-converted to IDR server-side). `waitForOtp` polls the FX-free `/v1` status for a classified code, so a `/v2` FX outage can never break OTP-waiting. An SMS can arrive with `otp_message` set and `otp_code` null; active-order reads and webhooks expose that message while the code-only helper keeps polling. Rapid SMS webhook deliveries are unordered; compare `sms_revision` and ignore an older code/message pair.
 
 ```ts
 import { SmscodeClient, OtpTimeoutError, OrderTerminalError } from "@smscode/sdk";
@@ -82,43 +82,54 @@ try {
     timeoutMs: 120_000,
   });
   console.log(`OTP ${otpCode} (status ${status})`);
-  // Use the code in your target app, then FINISH. Once an OTP has arrived,
-  // cancel/refund is closed — finish the order (see Example 2 for the no-OTP path).
+  // Use the code in your target app, then FINISH. Once any SMS has arrived,
+  // cancel/refund is closed — finish the order (see Example 2 for cancellation).
   await client.orders.finish(order.id);
 } catch (err) {
-  // No OTP (timeout or terminal-without-OTP) → cancel for a refund.
+  // A helper error is not proof that no SMS arrived. Re-read capabilities:
+  // a no-code SMS has otp_message set and can_cancel=false.
   if (err instanceof OtpTimeoutError || err instanceof OrderTerminalError) {
-    await client.orders.cancel(order.id);
+    const current = await client.v1.orders.get(order.id);
+    if (current.can_finish) {
+      console.log("SMS received:", current.otp_message ?? "no classified code");
+      await client.orders.finish(order.id);
+    } else if (current.can_cancel) {
+      await client.orders.cancel(order.id);
+    } else {
+      console.log(`Order ${order.id} is ${current.status}; no automatic action taken.`);
+    }
   } else throw err;
 }
 ```
 
-### Waiting for a *new* OTP after a resend
+### Waiting for a *new SMS* after a resend
 
-If you `resend` an order, the previous OTP is preserved server-side, so a plain `waitForOtp` resolves immediately on that stale code. Pass `afterCode` (the code you already saw) to wait for a genuinely new one:
+If you `resend` an order, the previous aggregate code is preserved server-side, so a plain `waitForOtp` resolves immediately on that stale code. Pass both the code and `sms_revision` you observed before the resend. The revision baseline detects a new SMS even when it repeats the same digits or contains only text/link content:
 
 ```ts
 const first = await client.orders.waitForOtp(order.id, { timeoutMs: 120_000 });
 
 await client.orders.resend(order.id); // re-open the order; the old code is preserved
 
-// Wait for a NEW code — the stale `first.otpCode` is skipped.
+// Wait for a NEW SMS — the stale snapshot is skipped.
 const next = await client.orders.waitForOtp(order.id, {
   afterCode: first.otpCode,
+  afterRevision: first.order.sms_revision,
   timeoutMs: 120_000,
 });
-console.log(`new OTP ${next.otpCode}`);
-// Use `next.otpCode`, then finish the order (as in Example 1) — do not cancel after an OTP.
+console.log("latest SMS:", next.order.otp_message);
+// `next.otpCode` can equal the old code when the follow-up had no classified
+// code. Inspect the exact message, then finish — do not cancel after delivery.
 await client.orders.finish(order.id);
 ```
 
-> Limitation: if the resent OTP has the **same digits** as the previous one, it can't be distinguished from the stale code (an observability/UX edge — the money lifecycle is unaffected).
+When only `afterCode` is supplied, identical digits remain indistinguishable. When only `afterRevision` is supplied, the helper waits for a strictly newer revision. A first-ever text/link-only SMS still has no aggregate code to return, so the code-only helper times out; read `otp_message` and server capabilities from the order instead.
 
 ## Example 2 — Cancel an order (and refund it)
 
 `cancel` is not auto-retried (no idempotency key). On `/v2` both money fields are typed USD objects.
 
-> **Cancel only refunds an order that has not received an OTP.** Once an OTP arrives, the order is consumed and cancel/refund is closed — `finish` it instead (Example 1).
+> **Cancel only refunds an order that has not received an SMS.** Once any SMS arrives, even without a detected OTP code, the order is consumed and cancel/refund is closed — `finish` it instead (Example 1).
 
 ```ts
 import { SmscodeClient } from "@smscode/sdk";
@@ -281,7 +292,7 @@ Every failure is a `SmscodeError` (or a subclass). Business failures carry a sta
 
 ## Smoke test
 
-`examples/smoke.ts` runs an end-to-end `create → waitForOtp → finish` (cancel only on no-OTP) against a test account. It is **gated** and places **no order** unless explicitly enabled:
+`examples/smoke.ts` runs an end-to-end `create → waitForOtp → finish` (cancel only when no SMS was delivered) against a test account. It is **gated** and places **no order** unless explicitly enabled:
 
 ```bash
 # Default: dry run — verifies config/read paths and exits before any create.

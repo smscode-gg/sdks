@@ -8,5 +8,9 @@ def handle_webhook(raw_body: bytes, signature_header: str | None, secret: str) -
     event = parse_webhook_event(raw_body)
     if event["event"] == "order.otp_received":
         otp_code = event["data"].get("otp_code")
-        print("OTP:", otp_code)
+        otp_message = event["data"].get("otp_message")
+        if otp_code:
+            print("OTP:", otp_code)
+        else:
+            print("SMS received without a classified code:", otp_message)
     return 204, "ok"

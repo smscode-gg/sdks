@@ -32,7 +32,8 @@ import type { components } from "./types.gen.js";
  * ```ts
  * const evt = parseWebhookEvent(rawBody);
  * if (evt.event === "order.otp_received") {
- *   console.log(evt.data.otp_code);
+ *   if (evt.data.otp_code) console.log("OTP:", evt.data.otp_code);
+ *   else console.log("SMS:", evt.data.otp_message);
  * }
  * ```
  */

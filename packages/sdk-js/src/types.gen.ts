@@ -715,7 +715,7 @@ export interface webhooks {
         put?: never;
         /**
          * Order lifecycle event (sent to your endpoint)
-         * @description Sent to your configured `webhook_url` whenever one of your orders transitions: an OTP arrives (`order.otp_received`) or the order reaches a terminal state (`order.completed`, `order.expired`, `order.canceled`). Authenticated, when a `webhook_secret` is set, with the `X-Webhook-Signature` header — the lowercase-hex `sha256=<hmac>` of the **raw request body** keyed by your secret. Verify the signature, then respond `2xx` to acknowledge.
+         * @description Sent to your configured `webhook_url` for every novel SMS delivery (`order.otp_received`) and when the order reaches a terminal state (`order.completed`, `order.expired`, `order.canceled`). A delivered SMS may have `otp_code: null` with a non-null `otp_message`. Multiple SMS events are self-consistent snapshots but may arrive out of order; do not infer SMS chronology from webhook delivery order. Authenticated, when a `webhook_secret` is set, with the `X-Webhook-Signature` header — the lowercase-hex `sha256=<hmac>` of the **raw request body** keyed by your secret. Verify the signature, then respond `2xx` to acknowledge.
          */
         post: operations["onOrderEvent"];
         delete?: never;
@@ -1204,7 +1204,7 @@ export interface components {
              * @description RFC 3339 timestamp of when the order was created, when recorded.
              * @example 2026-05-11T09:00:00+00:00
              */
-            created_at?: string | null;
+            created_at: string | null;
             /**
              * Format: int32
              * @description The product/tier the order was placed against — the selected tier on a routed order, or the requested tier on a legacy order.
@@ -1216,23 +1216,23 @@ export interface components {
              * @description The stable catalog product the order belongs to, when linked (`null` for older orders predating catalog backfill).
              * @example 88
              */
-            catalog_product_id?: number | null;
+            catalog_product_id: number | null;
             /**
              * Format: int32
              * @description The operator this tier belongs to; null for an `any` tier.
              * @example 42
              */
-            operator_id?: number | null;
+            operator_id: number | null;
             /**
              * @description Operator display name; null for an `any` tier.
              * @example Telkomsel
              */
-            operator_name?: string | null;
+            operator_name: string | null;
             /**
              * @description The rented phone number, once assigned.
              * @example +6281234567890
              */
-            phone_number?: string | null;
+            phone_number: string | null;
             /**
              * Format: int64
              * @description The charged price in **IDR** minor units (integer).
@@ -1240,38 +1240,49 @@ export interface components {
              */
             amount: number;
             /**
-             * @description The received verification code, when an SMS has arrived.
+             * @description The last classified verification code. It can remain `null` after SMS delivery when no code is detected.
              * @example 123456
              */
-            otp_code?: string | null;
+            otp_code: string | null;
+            /**
+             * @description The latest full received SMS body. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
+             * @example Your code is 123456
+             */
+            otp_message: string | null;
+            /**
+             * Format: int64
+             * @description Monotonic order-local revision of the aggregate `otp_code` and `otp_message` pair. Consumers must ignore an older pair. A retained code and the latest message may originate from different SMS commits; do not assume they coexisted in one provider message.
+             * @example 1
+             */
+            sms_revision: number;
             /**
              * Format: date-time
-             * @description RFC 3339 timestamp of when the verification SMS was received.
+             * @description RFC 3339 timestamp of the first SMS delivery; later SMS messages do not rebase it.
              * @example 2026-05-11T09:01:30+00:00
              */
-            otp_received_at?: string | null;
+            otp_received_at: string | null;
             /**
              * Format: date-time
              * @description RFC 3339 timestamp of when the rental window expires.
              * @example 2026-05-11T09:20:00+00:00
              */
-            expires_at?: string | null;
+            expires_at: string | null;
             /**
              * Format: date-time
              * @description RFC 3339 timestamp of when the order was canceled, when applicable.
              * @example 2026-05-11T09:05:00+00:00
              */
-            canceled_at?: string | null;
+            canceled_at: string | null;
             /**
              * @description A short machine/human reason when the order failed, when applicable.
              * @example NoNumbers
              */
-            failed_reason?: string | null;
-            /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
+            failed_reason: string | null;
+            /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
             can_resend: boolean;
-            /** @description Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window). */
+            /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
@@ -1284,7 +1295,7 @@ export interface components {
             resend_available_at: string | null;
             /**
              * Format: date-time
-             * @description When the min-cancel window clears; null when already clear or evidence exists.
+             * @description When the min-cancel window clears; null when already clear or SMS delivery evidence exists.
              */
             cancel_available_at: string | null;
             /**
@@ -1306,37 +1317,54 @@ export interface components {
             id: number;
             status: components["schemas"]["OrderStatusEnum"];
             /**
-             * @description The received verification code, when an SMS has arrived.
+             * @description The last classified verification code. It can remain `null` while `otp_message` and `otp_received_at` are non-null.
              * @example 123456
              */
-            otp_code?: string | null;
+            otp_code: string | null;
             /**
-             * @description The full received SMS message body, when available.
+             * @description The latest full received SMS body. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
              * @example Your code is 123456
              */
-            otp_message?: string | null;
+            otp_message: string | null;
+            /**
+             * Format: int64
+             * @description Monotonic order-local revision of the aggregate `otp_code` and `otp_message` pair. Consumers must ignore an older pair. A retained code and the latest message may originate from different SMS commits; do not assume they coexisted in one provider message.
+             * @example 1
+             */
+            sms_revision: number;
             /**
              * Format: date-time
-             * @description RFC 3339 timestamp of when the verification SMS was received.
+             * @description RFC 3339 timestamp of the first SMS delivery; later SMS messages do not rebase it.
              * @example 2026-05-11T09:01:30+00:00
              */
-            otp_received_at?: string | null;
+            otp_received_at: string | null;
             /**
              * Format: date-time
              * @description RFC 3339 timestamp of when the rental window expires.
              * @example 2026-05-11T09:20:00+00:00
              */
-            expires_at?: string | null;
+            expires_at: string | null;
             /**
              * @description A short reason when the order failed, when applicable.
              * @example NoNumbers
              */
-            failed_reason?: string | null;
-            /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
+            failed_reason: string | null;
+            /**
+             * Format: int32
+             * @description The operator this tier belongs to; null for an `any` tier.
+             * @example 42
+             */
+            operator_id: number | null;
+            /**
+             * @description Operator display name; null for an `any` tier.
+             * @example Telkomsel
+             */
+            operator_name: string | null;
+            /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
             can_resend: boolean;
-            /** @description Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window). */
+            /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
@@ -1349,7 +1377,7 @@ export interface components {
             resend_available_at: string | null;
             /**
              * Format: date-time
-             * @description When the min-cancel window clears; null when already clear or evidence exists.
+             * @description When the min-cancel window clears; null when already clear or SMS delivery evidence exists.
              */
             cancel_available_at: string | null;
             /**
@@ -1422,7 +1450,7 @@ export interface components {
              */
             phone_number?: string | null;
             /** @description Always `null` on a fresh create (no SMS yet). */
-            otp_code?: string | null;
+            otp_code: string | null;
             /**
              * Format: date-time
              * @description Always `null` on a fresh create (no SMS yet).
@@ -1465,11 +1493,11 @@ export interface components {
              * @example 750000
              */
             amount: number;
-            /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
+            /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
             can_resend: boolean;
-            /** @description Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window). */
+            /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
@@ -1482,7 +1510,7 @@ export interface components {
             resend_available_at: string | null;
             /**
              * Format: date-time
-             * @description When the min-cancel window clears; null when already clear or evidence exists.
+             * @description When the min-cancel window clears; null when already clear or SMS delivery evidence exists.
              */
             cancel_available_at: string | null;
             /**
@@ -1608,7 +1636,7 @@ export interface components {
              * @description RFC 3339 timestamp of when the order was created, when recorded.
              * @example 2026-05-11T09:00:00+00:00
              */
-            created_at?: string | null;
+            created_at: string | null;
             /**
              * Format: int32
              * @description The selected (routed) or requested (legacy) tier id for this order.
@@ -1620,57 +1648,68 @@ export interface components {
              * @description The stable catalog id this order belongs to, when linked.
              * @example 88
              */
-            catalog_product_id?: number | null;
+            catalog_product_id: number | null;
             /**
              * Format: int32
              * @description The operator this tier belongs to; null for an `any` tier.
              * @example 42
              */
-            operator_id?: number | null;
+            operator_id: number | null;
             /**
              * @description Operator display name; null for an `any` tier.
              * @example Telkomsel
              */
-            operator_name?: string | null;
+            operator_name: string | null;
             /**
              * @description The rented phone number, once assigned.
              * @example +6281234567890
              */
-            phone_number?: string | null;
+            phone_number: string | null;
             amount: components["schemas"]["V2Money"];
             /**
-             * @description The received verification code, when an SMS has arrived.
+             * @description The last classified verification code. It can remain `null` after SMS delivery when no code is detected.
              * @example 123456
              */
-            otp_code?: string | null;
+            otp_code: string | null;
+            /**
+             * @description The latest full received SMS body. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
+             * @example Your code is 123456
+             */
+            otp_message: string | null;
+            /**
+             * Format: int64
+             * @description Monotonic order-local revision of the aggregate `otp_code` and `otp_message` pair. Consumers must ignore an older pair. A retained code and the latest message may originate from different SMS commits; do not assume they coexisted in one provider message.
+             * @example 1
+             */
+            sms_revision: number;
             /**
              * Format: date-time
-             * @description RFC 3339 timestamp of when the verification SMS was received.
+             * @description RFC 3339 timestamp of the first SMS delivery; later SMS messages do not rebase it.
              * @example 2026-05-11T09:01:30+00:00
              */
-            otp_received_at?: string | null;
+            otp_received_at: string | null;
             /**
              * Format: date-time
              * @description RFC 3339 timestamp of when the rental window expires.
              * @example 2026-05-11T09:20:00+00:00
              */
-            expires_at?: string | null;
+            expires_at: string | null;
             /**
              * Format: date-time
              * @description RFC 3339 timestamp of when the order was canceled, when applicable.
              * @example 2026-05-11T09:05:00+00:00
              */
-            canceled_at?: string | null;
+            canceled_at: string | null;
             /**
              * @description A short reason when the order failed, when applicable.
              * @example NoNumbers
              */
-            failed_reason?: string | null;
-            /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
+            failed_reason: string | null;
+            /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
             can_resend: boolean;
-            /** @description Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window). */
+            /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
@@ -1683,7 +1722,7 @@ export interface components {
             resend_available_at: string | null;
             /**
              * Format: date-time
-             * @description When the min-cancel window clears; null when already clear or evidence exists.
+             * @description When the min-cancel window clears; null when already clear or SMS delivery evidence exists.
              */
             cancel_available_at: string | null;
             /**
@@ -1754,7 +1793,7 @@ export interface components {
              */
             phone_number?: string | null;
             /** @description Always `null` on a fresh create (no SMS yet). */
-            otp_code?: string | null;
+            otp_code: string | null;
             /**
              * Format: date-time
              * @description Always `null` on a fresh create (no SMS yet).
@@ -1792,11 +1831,11 @@ export interface components {
              */
             operator_name?: string | null;
             amount: components["schemas"]["V2Money"];
-            /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
+            /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
             can_resend: boolean;
-            /** @description Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window). */
+            /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
@@ -1809,7 +1848,7 @@ export interface components {
             resend_available_at: string | null;
             /**
              * Format: date-time
-             * @description When the min-cancel window clears; null when already clear or evidence exists.
+             * @description When the min-cancel window clears; null when already clear or SMS delivery evidence exists.
              */
             cancel_available_at: string | null;
             /**
@@ -1981,15 +2020,21 @@ export interface components {
              */
             phone_number: string | null;
             /**
-             * @description The parsed verification code. Present on `order.otp_received`; `null` otherwise (or when not yet parsed).
+             * @description The aggregate parsed verification code as of this SMS commit. It may be `null` on `order.otp_received` when the delivered message has no classifiable code, or retain an earlier valid code on a later no-code SMS.
              * @example 123456
              */
             otp_code: string | null;
             /**
-             * @description The full received SMS text, when available.
+             * @description The exact SMS text for this `order.otp_received` commit, when available. It can be non-null while `otp_code` is null.
              * @example Your code is 123456
              */
             otp_message: string | null;
+            /**
+             * Format: int64
+             * @description Monotonic order-local revision for this `order.otp_received` snapshot. Terminal events carry `null`. Delivery remains unordered, so consumers must reject an older code/message pair.
+             * @example 1
+             */
+            sms_revision: number | null;
             /**
              * Format: int32
              * @description The product (tier) id of the order.
@@ -2023,11 +2068,11 @@ export interface components {
              * @example Telkomsel
              */
             operator_name: string | null;
-            /** @description Server-authoritative: the order can be finished (OTP evidence + non-terminal). */
+            /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
             can_resend: boolean;
-            /** @description Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window). */
+            /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
             /** @description Server-authoritative: replace allowed (== can_cancel). */
             can_replace: boolean;
@@ -2040,7 +2085,7 @@ export interface components {
             resend_available_at: string | null;
             /**
              * Format: date-time
-             * @description When the min-cancel window clears; null when already clear or evidence exists.
+             * @description When the min-cancel window clears; null when already clear or SMS delivery evidence exists.
              */
             cancel_available_at: string | null;
             /**

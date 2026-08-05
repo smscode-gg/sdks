@@ -80,6 +80,42 @@ def test_after_code_ignores_stale_and_resolves_changed_code() -> None:
     assert result.otp_code == "222222"
 
 
+def test_after_revision_detects_no_code_follow_up_with_retained_code() -> None:
+    snapshots: Iterator[dict[str, object]] = iter(
+        [
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": "111111",
+                "otp_message": "Your code is 111111",
+                "sms_revision": 7,
+            },
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": "111111",
+                "otp_message": "Confirm at https://example.test/confirm",
+                "sms_revision": 8,
+            },
+        ]
+    )
+    now_ms = 0.0
+
+    def sleep(seconds: float) -> None:
+        nonlocal now_ms
+        now_ms += seconds * 1000
+
+    result = wait_for_otp(
+        lambda: next(snapshots),
+        after_code="111111",
+        after_revision=7,
+        sleep=sleep,
+        now=lambda: now_ms,
+    )
+
+    assert result.otp_code == "111111"
+    assert result.order["otp_message"] == "Confirm at https://example.test/confirm"
+    assert result.order["sms_revision"] == 8
+
+
 def test_terminal_status_without_usable_otp_raises() -> None:
     with pytest.raises(OrderTerminalError):
         wait_for_otp(
@@ -99,6 +135,64 @@ def test_timeout_raises() -> None:
     with pytest.raises(OtpTimeoutError):
         wait_for_otp(
             lambda: {"status": "ACTIVE", "otp_code": None},
+            timeout_ms=3000,
+            poll_interval_ms=3000,
+            sleep=sleep,
+            now=lambda: now_ms,
+        )
+
+
+def test_sms_without_classified_code_keeps_polling() -> None:
+    snapshots: Iterator[dict[str, object]] = iter(
+        [
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": None,
+                "otp_message": "https://shopee.example/confirm",
+                "can_cancel": False,
+            },
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": "123456",
+                "can_cancel": False,
+            },
+        ]
+    )
+    calls = 0
+    now_ms = 0.0
+
+    def poll() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return next(snapshots)
+
+    def sleep(seconds: float) -> None:
+        nonlocal now_ms
+        now_ms += seconds * 1000
+
+    result = wait_for_otp(poll, sleep=sleep, now=lambda: now_ms)
+
+    assert result.otp_code == "123456"
+    assert calls == 2
+
+
+def test_message_only_delivery_times_out_instead_of_becoming_a_code() -> None:
+    now_ms = 0.0
+
+    def sleep(seconds: float) -> None:
+        nonlocal now_ms
+        now_ms += seconds * 1000
+
+    with pytest.raises(OtpTimeoutError):
+        wait_for_otp(
+            lambda: {
+                "status": "OTP_RECEIVED",
+                "otp_code": None,
+                "otp_message": "https://shopee.example/confirm",
+                "sms_revision": 1,
+                "can_finish": True,
+                "can_cancel": False,
+            },
             timeout_ms=3000,
             poll_interval_ms=3000,
             sleep=sleep,
@@ -140,6 +234,78 @@ async def test_async_wait_for_otp_mirrors_sync() -> None:
     now_ms = 0.0
 
     async def poll() -> dict[str, str | None]:
+        return next(snapshots)
+
+    async def sleep(seconds: float) -> None:
+        nonlocal now_ms
+        now_ms += seconds * 1000
+
+    result = await async_wait_for_otp(poll, sleep=sleep, now=lambda: now_ms)
+
+    assert result.otp_code == "123456"
+
+
+@pytest.mark.asyncio
+async def test_async_after_revision_detects_no_code_follow_up_with_retained_code() -> None:
+    snapshots: Iterator[dict[str, object]] = iter(
+        [
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": "111111",
+                "otp_message": "Your code is 111111",
+                "sms_revision": 4,
+            },
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": "111111",
+                "otp_message": "Confirm at https://example.test/confirm",
+                "sms_revision": 5,
+            },
+        ]
+    )
+    now_ms = 0.0
+
+    async def poll() -> dict[str, object]:
+        return next(snapshots)
+
+    async def sleep(seconds: float) -> None:
+        nonlocal now_ms
+        now_ms += seconds * 1000
+
+    result = await async_wait_for_otp(
+        poll,
+        after_code="111111",
+        after_revision=4,
+        sleep=sleep,
+        now=lambda: now_ms,
+    )
+
+    assert result.otp_code == "111111"
+    assert result.order["otp_message"] == "Confirm at https://example.test/confirm"
+    assert result.order["sms_revision"] == 5
+
+
+@pytest.mark.asyncio
+async def test_async_sms_without_classified_code_keeps_polling() -> None:
+    snapshots: Iterator[dict[str, object]] = iter(
+        [
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": None,
+                "otp_message": "https://shopee.example/confirm",
+                "can_cancel": False,
+            },
+            {
+                "status": "OTP_RECEIVED",
+                "otp_code": "123456",
+                "otp_message": "Kode 123456",
+                "can_cancel": False,
+            },
+        ]
+    )
+    now_ms = 0.0
+
+    async def poll() -> dict[str, object]:
         return next(snapshots)
 
     async def sleep(seconds: float) -> None:

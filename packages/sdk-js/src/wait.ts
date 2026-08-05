@@ -10,7 +10,10 @@
  * The loop:
  *  1. Poll `/v1/orders/{id}`.
  *  2. If `otp_code` is non-null → resolve `{ otpCode, status, order }`.
- *  3. If the order reached a TERMINAL status with no OTP → throw {@link OrderTerminalError}.
+ *     The order may already be `OTP_RECEIVED` without a classified code; that is
+ *     SMS delivery evidence, but this code-only helper keeps polling.
+ *  3. If the order reached a TERMINAL status with no classified code → throw
+ *     {@link OrderTerminalError}.
  *  4. If the elapsed time would exceed `timeoutMs` → throw {@link OtpTimeoutError}.
  *  5. On a `429` (rate limit) → sleep `retryAfterSeconds` (falling back to the poll
  *     interval), then poll again. Any other error propagates.
@@ -25,9 +28,10 @@ import type { OrderStatus } from "./errors.js";
 export interface OtpPollSnapshot {
   status: OrderStatus;
   otp_code?: string | null;
+  sms_revision?: number | null;
 }
 
-/** Terminal order states — once reached, no OTP will ever arrive. */
+/** Terminal order states — once reached, no new classified OTP will arrive. */
 const TERMINAL_STATUSES: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
   "COMPLETED",
   "CANCELED",
@@ -49,16 +53,18 @@ export interface WaitForOtpOptions {
   /** Delay between polls in ms. Default 3000. */
   pollIntervalMs?: number;
   /**
-   * Resend baseline: when set, `waitForOtp` IGNORES a polled `otp_code` equal to
-   * this value and resolves only on a DIFFERENT non-empty code. Pass the code you
-   * already received *before* a `resend` so the wait does not immediately
-   * re-resolve on the preserved (non-cleared) prior code. **Limitation:** if the
-   * platform genuinely re-sends an OTP with identical digits, this code-based
-   * baseline cannot distinguish it — this is an observability/UX convenience, NOT
-   * a money or lifecycle guarantee (`finish` still succeeds on any OTP evidence
-   * after a resend, regardless of this option).
+   * Resend code baseline. By itself, this ignores the same preserved code and
+   * resolves on a different non-empty code. Pair it with `afterRevision` to also
+   * detect identical-code or no-code follow-up SMS deliveries.
    */
   afterCode?: string;
+  /**
+   * Resend baseline for SMS delivery. When set, a retained `otp_code` becomes
+   * usable once `sms_revision` advances beyond this value, even when the new SMS
+   * has no classified code of its own. Pass the revision observed before
+   * `resend`; inspect `result.order.otp_message` for the exact latest SMS.
+   */
+  afterRevision?: number;
   /** Wait clock. Defaults to a `setTimeout`-backed sleep. Injectable for tests. */
   sleep?: (ms: number) => Promise<void>;
   /** Monotonic time source in ms. Defaults to `Date.now`. Injectable for tests. */
@@ -88,9 +94,13 @@ function defaultSleep(ms: number): Promise<void> {
  * @param poll     Fetches the current order snapshot. **Must hit the FX-free `/v1`
  *                 path** so an FX outage cannot break the wait.
  * @param orderId  The order to wait on.
- * @param opts     Timeout / interval / injectable clock.
- * @throws {OrderTerminalError} the order reached a terminal status with no OTP.
- * @throws {OtpTimeoutError}    `timeoutMs` elapsed with no OTP.
+ * @param opts     Timeout / interval / resend baselines / injectable clock.
+ * A helper error is not proof that cancellation is allowed: an SMS without a
+ * classified code closes refund eligibility. Fetch the current order and gate
+ * cancellation on its server-authoritative `can_cancel` capability.
+ *
+ * @throws {OrderTerminalError} the order reached a terminal status with no classified code.
+ * @throws {OtpTimeoutError}    `timeoutMs` elapsed with no classified code.
  * @throws Any non-`429` error from `poll` propagates unchanged.
  */
 export async function waitForOtp<TOrder extends OtpPollSnapshot>(
@@ -103,6 +113,7 @@ export async function waitForOtp<TOrder extends OtpPollSnapshot>(
   const sleep = opts.sleep ?? defaultSleep;
   const now = opts.now ?? Date.now;
   const afterCode = opts.afterCode;
+  const afterRevision = opts.afterRevision;
 
   const deadline = now() + timeoutMs;
 
@@ -128,15 +139,20 @@ export async function waitForOtp<TOrder extends OtpPollSnapshot>(
       throw err;
     }
 
-    // OTP arrived → done (even on a COMPLETED order that carries one). With
-    // `afterCode` set, a polled code EQUAL to the baseline is the stale pre-resend
-    // code (resend never clears it) → skip it and keep polling for a new one.
-    if (
-      order.otp_code != null &&
-      order.otp_code !== "" &&
-      order.otp_code !== afterCode
-    ) {
-      return { otpCode: order.otp_code, status: order.status, order };
+    // OTP arrived → done (even on a COMPLETED order that carries one). A resend
+    // can retain the aggregate code while a new no-code SMS advances the durable
+    // revision, so either a changed code or an advanced revision satisfies the
+    // caller's baseline. Without a baseline, any non-empty code resolves.
+    const code = order.otp_code;
+    const hasCode = code != null && code !== "";
+    const codeChanged = afterCode !== undefined && code !== afterCode;
+    const revisionAdvanced =
+      afterRevision !== undefined &&
+      typeof order.sms_revision === "number" &&
+      order.sms_revision > afterRevision;
+    const hasBaseline = afterCode !== undefined || afterRevision !== undefined;
+    if (hasCode && (!hasBaseline || codeChanged || revisionAdvanced)) {
+      return { otpCode: code, status: order.status, order };
     }
 
     // Terminal status without an OTP → it will never arrive.

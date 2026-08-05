@@ -407,6 +407,7 @@ class V2OrdersResource:
         order_id: int,
         *,
         after_code: str | None = None,
+        after_revision: int | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         sleep: SyncSleep | None = None,
@@ -415,6 +416,7 @@ class V2OrdersResource:
         return wait_for_otp(
             lambda: self._request("GET", f"/v1/orders/{order_id}").data,
             after_code=after_code,
+            after_revision=after_revision,
             timeout_ms=timeout_ms,
             poll_interval_ms=poll_interval_ms,
             sleep=sleep,
@@ -511,6 +513,7 @@ class V1OrdersResource:
         order_id: int,
         *,
         after_code: str | None = None,
+        after_revision: int | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         sleep: SyncSleep | None = None,
@@ -519,6 +522,7 @@ class V1OrdersResource:
         return wait_for_otp(
             lambda: self.get(order_id),
             after_code=after_code,
+            after_revision=after_revision,
             timeout_ms=timeout_ms,
             poll_interval_ms=poll_interval_ms,
             sleep=sleep,
@@ -613,6 +617,7 @@ class AsyncV2OrdersResource:
         order_id: int,
         *,
         after_code: str | None = None,
+        after_revision: int | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         sleep: AsyncSleep | None = None,
@@ -624,6 +629,7 @@ class AsyncV2OrdersResource:
         return await async_wait_for_otp(
             poll,
             after_code=after_code,
+            after_revision=after_revision,
             timeout_ms=timeout_ms,
             poll_interval_ms=poll_interval_ms,
             sleep=sleep,
@@ -722,6 +728,7 @@ class AsyncV1OrdersResource:
         order_id: int,
         *,
         after_code: str | None = None,
+        after_revision: int | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         sleep: AsyncSleep | None = None,
@@ -730,6 +737,7 @@ class AsyncV1OrdersResource:
         return await async_wait_for_otp(
             lambda: self.get(order_id),
             after_code=after_code,
+            after_revision=after_revision,
             timeout_ms=timeout_ms,
             poll_interval_ms=poll_interval_ms,
             sleep=sleep,

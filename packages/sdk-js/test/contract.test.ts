@@ -88,6 +88,8 @@ export function buildContractHarness(openapiYaml: string): {
   ) => ValidateFunction;
   /** Compile a validator for a top-level `components.schemas.{name}`. */
   schemaValidator: (name: string) => ValidateFunction;
+  /** Compile a validator for any schema node addressed from the document root. */
+  documentValidator: (pointer: readonly string[]) => ValidateFunction;
   /** Format ajv errors into a single readable line for assertion messages. */
   formatErrors: (validate: ValidateFunction) => string;
 } {
@@ -136,6 +138,11 @@ export function buildContractHarness(openapiYaml: string): {
         $ref: `${OPENAPI_BASE_ID}#/components/schemas/${escapePointer(name)}`,
       });
     },
+    documentValidator(pointer) {
+      return ajv.compile({
+        $ref: `${OPENAPI_BASE_ID}#/${pointer.map(escapePointer).join("/")}`,
+      });
+    },
     formatErrors(validate) {
       return (validate.errors ?? [])
         .map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`.trim())
@@ -143,6 +150,80 @@ export function buildContractHarness(openapiYaml: string): {
     },
   };
 }
+
+// ───── every published media example validates against its adjacent schema ─────
+// OpenAPI examples are executable contract fixtures, not illustrative prose. Walk
+// the whole document so a newly-added path, response, request body, or webhook is
+// guarded without adding another endpoint-specific test.
+describe("every published OpenAPI media example validates against its schema", () => {
+  const yamlText = readFileSync(OPENAPI_PATH, "utf8");
+  const doc = yaml.load(yamlText, { schema: yaml.JSON_SCHEMA }) as Record<
+    string,
+    unknown
+  >;
+  const harness = buildContractHarness(yamlText);
+
+  type PublishedExample = {
+    name: string;
+    schemaPointer: string[];
+    value: unknown;
+  };
+
+  const published: PublishedExample[] = [];
+
+  function collectMediaExamples(node: unknown, pointer: string[]): void {
+    if (Array.isArray(node)) {
+      node.forEach((value, index) =>
+        collectMediaExamples(value, [...pointer, String(index)]),
+      );
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+
+    const object = node as Record<string, unknown>;
+    if (
+      object.schema !== null &&
+      typeof object.schema === "object" &&
+      object.examples !== null &&
+      typeof object.examples === "object" &&
+      !Array.isArray(object.examples)
+    ) {
+      for (const [exampleName, rawExample] of Object.entries(
+        object.examples as Record<string, unknown>,
+      )) {
+        if (
+          rawExample !== null &&
+          typeof rawExample === "object" &&
+          Object.hasOwn(rawExample, "value")
+        ) {
+          published.push({
+            name: `${pointer.join(".")}.examples.${exampleName}`,
+            schemaPointer: [...pointer, "schema"],
+            value: (rawExample as { value: unknown }).value,
+          });
+        }
+      }
+    }
+
+    for (const [key, value] of Object.entries(object)) {
+      collectMediaExamples(value, [...pointer, key]);
+    }
+  }
+
+  collectMediaExamples(doc, []);
+
+  it("discovers published examples instead of passing vacuously", () => {
+    expect(published.length).toBeGreaterThan(0);
+  });
+
+  for (const example of published) {
+    it(example.name, () => {
+      const validate = harness.documentValidator(example.schemaPointer);
+      const ok = validate(example.value);
+      expect(ok, harness.formatErrors(validate)).toBe(true);
+    });
+  }
+});
 
 // ───────────────────── offline ajv-harness unit test ─────────────────────
 // Runs ALWAYS (no token needed): proves the validation logic with fixtures so a
@@ -218,6 +299,33 @@ describe("contract harness (offline, fixture-driven)", () => {
     expect(ok, harness.formatErrors(validate)).toBe(true);
   });
 
+  it("ACCEPTS the actual v1 create-item shape without read-only SMS fields", () => {
+    const validate = harness.schemaValidator("V1CreateOrderItem");
+    const ok = validate({
+      id: 90210,
+      status: "ACTIVE",
+      phone_number: "+6281234567890",
+      otp_code: null,
+      otp_received_at: null,
+      expires_at: "2026-07-31T02:20:00Z",
+      failed_reason: null,
+      product_id: 1024,
+      catalog_product_id: 88,
+      operator_id: 42,
+      operator_name: "Telkomsel",
+      amount: 750000,
+      can_finish: false,
+      can_resend: false,
+      can_cancel: false,
+      can_replace: false,
+      can_reactivate: false,
+      resend_available_at: null,
+      cancel_available_at: "2026-07-31T02:02:00Z",
+      replace_available_at: "2026-07-31T02:02:00Z",
+    });
+    expect(ok, harness.formatErrors(validate)).toBe(true);
+  });
+
   it("REJECTS an ErrorResponse with an unknown error code", () => {
     const validate = harness.schemaValidator("ErrorResponse");
     const bad = validate({
@@ -285,8 +393,8 @@ describe("contract harness (offline, fixture-driven)", () => {
   });
 
   // the outbound webhook `data` ALWAYS emits the 7 capability fields AND the
-  // operator dimension (operator_id/operator_name) AND the 6 core fields
-  // (phone_number, otp_code, otp_message, catalog_product_id, country, platform)
+  // operator dimension (operator_id/operator_name) AND the SMS revision + 6 core
+  // fields (phone_number, otp_code, otp_message, catalog_product_id, country, platform)
   // — webhook_notifier::webhook_data_payload. EVERY key is `required`, so a
   // caps-less OR operator-less OR core-field-less payload MUST fail; a full
   // payload MUST pass. These fixtures pair with the Rust producer unit test to
@@ -302,6 +410,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -329,6 +438,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -347,6 +457,31 @@ describe("contract harness (offline, fixture-driven)", () => {
     expect(ok, harness.formatErrors(validate)).toBe(true);
   });
 
+  it("REJECTS a WebhookEventData payload missing the required SMS revision", () => {
+    const validate = harness.schemaValidator("WebhookEventData");
+    const bad = validate({
+      order_id: 90210,
+      phone_number: "+6281234567890",
+      otp_code: "123456",
+      otp_message: "Your code is 123456",
+      product_id: 1024,
+      catalog_product_id: 88,
+      country: "Indonesia",
+      platform: "WhatsApp",
+      operator_id: 42,
+      operator_name: "Telkomsel",
+      can_finish: true,
+      can_resend: true,
+      can_cancel: false,
+      can_replace: false,
+      can_reactivate: false,
+      resend_available_at: null,
+      cancel_available_at: null,
+      replace_available_at: null,
+    });
+    expect(bad).toBe(false);
+  });
+
   it("REJECTS a WebhookEventData payload missing the required operator fields", () => {
     // The producer ALWAYS emits operator_id + operator_name (null for `any`), so a
     // payload omitting the keys entirely is drift (matches the runtime contract).
@@ -356,6 +491,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -383,6 +519,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -411,6 +548,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -432,6 +570,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -461,6 +600,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       country: "Indonesia",
@@ -490,6 +630,7 @@ describe("contract harness (offline, fixture-driven)", () => {
       phone_number: "+6281234567890",
       otp_code: "123456",
       otp_message: "Your code is 123456",
+      sms_revision: 1,
       product_id: 1024,
       catalog_product_id: 88,
       // country dropped — a present-as-key field the producer always emits.
@@ -602,6 +743,43 @@ describe("operator selector requires both coordinates (#394C M005)", () => {
       expect(queryParam(path, "platform_id").required ?? false).toBe(false);
     });
   }
+});
+
+describe("SMS snapshot response type compatibility (#436)", () => {
+  const doc = yaml.load(readFileSync(OPENAPI_PATH, "utf8"), {
+    schema: yaml.JSON_SCHEMA,
+  }) as {
+    components: {
+      schemas: Record<
+        string,
+        { required?: string[]; properties?: Record<string, unknown> }
+      >;
+    };
+  };
+
+  for (const schemaName of [
+    "V1OrderSummary",
+    "V1OrderStatus",
+    "V2OrderSummary",
+  ]) {
+    it(`${schemaName} requires every always-emitted SMS snapshot field`, () => {
+      const required = doc.components.schemas[schemaName]?.required ?? [];
+      expect(required).toContain("sms_revision");
+      expect(required).toContain("otp_code");
+      expect(required).toContain("otp_message");
+      expect([...required].sort()).toEqual(
+        Object.keys(doc.components.schemas[schemaName]?.properties ?? {}).sort(),
+      );
+    });
+  }
+
+  it("keeps v1/v2 create-item otp_code required in parity", () => {
+    for (const schemaName of ["V1CreateOrderItem", "V2CreateOrderItem"]) {
+      expect(doc.components.schemas[schemaName]?.required ?? []).toContain(
+        "otp_code",
+      );
+    }
+  });
 });
 
 // ─────────────────── live API contract suite (gated) ───────────────────

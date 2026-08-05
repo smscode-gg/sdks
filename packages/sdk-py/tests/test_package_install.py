@@ -28,8 +28,8 @@ def test_wheel_sdist_contents_and_installed_imports(tmp_path: Path) -> None:
         [sys.executable, "-m", "twine", "check", "--strict", *DIST.iterdir()], check=True
     )
 
-    wheel = next(DIST.glob("smscode-1.1.0-py3-none-any.whl"))
-    sdist = next(DIST.glob("smscode-1.1.0.tar.gz"))
+    wheel = next(DIST.glob("smscode-1.2.0-py3-none-any.whl"))
+    sdist = next(DIST.glob("smscode-1.2.0.tar.gz"))
 
     inspect_wheel(wheel)
     inspect_sdist(sdist)
@@ -81,7 +81,7 @@ def smoke_install_wheel(wheel: Path, tmp_path: Path) -> None:
                 "import importlib.metadata as metadata; "
                 "from smscode import VERSION, AsyncSmscodeClient, SmscodeClient, "
                 "verify_webhook_signature; "
-                "assert VERSION == '1.1.0'; "
+                "assert VERSION == '1.2.0'; "
                 "assert SmscodeClient.__name__ == 'SmscodeClient'; "
                 "assert AsyncSmscodeClient.__name__ == 'AsyncSmscodeClient'; "
                 "assert callable(verify_webhook_signature); "

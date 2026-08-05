@@ -62,7 +62,7 @@ Python:
 pip install smscode
 ```
 
-## Recipe: create → waitForOtp → finish (cancel only on no-OTP)
+## Recipe: create → waitForOtp → finish (cancel only when `can_cancel`)
 
 ```ts
 import {
@@ -83,19 +83,22 @@ const { orders, idempotencyKey } = await client.orders.create({
 });
 const orderId = orders[0]!.id;
 
-// 2) Poll the FX-free /v1 status until the OTP arrives (survives a /v2 FX 503).
+// 2) Poll the FX-free /v1 status until a classified code arrives. A delivered
+//    SMS can have otp_message set and otp_code=null; this helper keeps polling.
 try {
   const { otpCode } = await client.orders.waitForOtp(orderId, {
     timeoutMs: 120_000,
   });
   console.log("OTP:", otpCode);
-  // 3) Use the code in your target app, then FINISH the order. Once an OTP has
+  // 3) Use the code in your target app, then FINISH the order. Once any SMS has
   //    arrived, cancel/refund is CLOSED — finish it (do NOT cancel).
   await client.orders.finish(orderId);
 } catch (err) {
-  // 4) No OTP (timeout or terminal-without-OTP) → cancel for a refund.
+  // 4) A helper error is not proof that no SMS arrived. Re-read the server state:
+  //    a no-code SMS has otp_message set and can_cancel=false.
   if (err instanceof OtpTimeoutError || err instanceof OrderTerminalError) {
-    await client.orders.cancel(orderId);
+    const current = await client.orders.get(orderId);
+    if (current.can_cancel) await client.orders.cancel(orderId);
   } else {
     throw err;
   }
@@ -188,9 +191,12 @@ if (!ok) return new Response("bad signature", { status: 401 });
 
 const event = parseWebhookEvent(rawBody);
 if (event.event === "order.otp_received") {
-  console.log(event.data.otp_code);
+  if (event.data.otp_code) console.log("OTP:", event.data.otp_code);
+  else console.log("SMS received without a classified code:", event.data.otp_message);
 }
 ```
+
+`order.otp_received` is the stable event name for every novel SMS. `otp_code` is nullable and `otp_message` carries the exact SMS text. Delivery is unordered when multiple SMS messages arrive quickly, but each event contains a self-consistent aggregate code/message snapshot. A retained code may come from an earlier SMS than the latest message, so do not assume both fields coexisted in one provider message. Use the monotonic `sms_revision` to reject an older aggregate pair.
 
 ## Python SDK recipe
 
@@ -218,7 +224,9 @@ with client:
         # Submit otp.otp_code in your target app here.
         client.orders.finish(order_id)
     except (OtpTimeoutError, OrderTerminalError):
-        client.orders.cancel(order_id)
+        current = client.orders.get(order_id)
+        if current["can_cancel"]:
+            client.orders.cancel(order_id)
 ```
 
 For resend flows, preserve the previous code:
@@ -237,4 +245,6 @@ from smscode import parse_webhook_event, verify_webhook_signature
 if not verify_webhook_signature(raw_body, signature_header or "", secret):
     return 401
 event = parse_webhook_event(raw_body)
+if event["event"] == "order.otp_received":
+    print(event["data"].get("otp_code"), event["data"].get("otp_message"))
 ```

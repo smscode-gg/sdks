@@ -398,13 +398,25 @@ paths:
                         created_at: '2026-05-11T09:00:00+00:00'
                         product_id: 1024
                         catalog_product_id: 88
+                        operator_id: 42
+                        operator_name: Telkomsel
                         phone_number: '+6281234567890'
                         amount: 750000
                         otp_code: null
+                        otp_message: null
+                        sms_revision: 0
                         otp_received_at: null
                         expires_at: '2026-05-11T09:20:00+00:00'
                         canceled_at: null
                         failed_reason: null
+                        can_finish: false
+                        can_resend: false
+                        can_cancel: false
+                        can_replace: false
+                        can_reactivate: false
+                        resend_available_at: null
+                        cancel_available_at: '2026-05-11T09:02:00+00:00'
+                        replace_available_at: '2026-05-11T09:02:00+00:00'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -447,11 +459,22 @@ paths:
                     data:
                       - id: 90210
                         status: OTP_RECEIVED
-                        otp_code: '123456'
-                        otp_message: 'Your code is 123456'
+                        otp_code: null
+                        otp_message: 'Confirm your login: https://example.com/confirm'
+                        sms_revision: 1
                         otp_received_at: '2026-05-11T09:01:30+00:00'
                         expires_at: '2026-05-11T09:20:00+00:00'
                         failed_reason: null
+                        operator_id: 42
+                        operator_name: Telkomsel
+                        can_finish: true
+                        can_resend: true
+                        can_cancel: false
+                        can_replace: false
+                        can_reactivate: false
+                        resend_available_at: null
+                        cancel_available_at: null
+                        replace_available_at: null
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -494,13 +517,25 @@ paths:
                       created_at: '2026-05-11T09:00:00+00:00'
                       product_id: 1024
                       catalog_product_id: 88
+                      operator_id: 42
+                      operator_name: Telkomsel
                       phone_number: '+6281234567890'
                       amount: 750000
                       otp_code: '123456'
+                      otp_message: 'Your code is 123456'
+                      sms_revision: 1
                       otp_received_at: '2026-05-11T09:01:30+00:00'
                       expires_at: '2026-05-11T09:20:00+00:00'
                       canceled_at: null
                       failed_reason: null
+                      can_finish: false
+                      can_resend: false
+                      can_cancel: false
+                      can_replace: false
+                      can_reactivate: false
+                      resend_available_at: null
+                      cancel_available_at: null
+                      replace_available_at: null
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -581,7 +616,17 @@ paths:
                           failed_reason: null
                           product_id: 1024
                           catalog_product_id: 88
+                          operator_id: 42
+                          operator_name: Telkomsel
                           amount: 750000
+                          can_finish: false
+                          can_resend: false
+                          can_cancel: false
+                          can_replace: false
+                          can_reactivate: false
+                          resend_available_at: null
+                          cancel_available_at: '2026-05-11T09:02:00+00:00'
+                          replace_available_at: '2026-05-11T09:02:00+00:00'
                       failed_count: 0
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -835,7 +880,17 @@ paths:
                           failed_reason: null
                           product_id: 1024
                           catalog_product_id: 88
+                          operator_id: 42
+                          operator_name: Telkomsel
                           amount: 750000
+                          can_finish: false
+                          can_resend: false
+                          can_cancel: false
+                          can_replace: false
+                          can_reactivate: false
+                          resend_available_at: null
+                          cancel_available_at: '2026-05-11T10:02:00+00:00'
+                          replace_available_at: '2026-05-11T10:02:00+00:00'
                       failed_count: 0
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -1225,6 +1280,8 @@ paths:
                         created_at: '2026-05-11T09:00:00+00:00'
                         product_id: 1024
                         catalog_product_id: 88
+                        operator_id: 42
+                        operator_name: Telkomsel
                         phone_number: '+6281234567890'
                         amount:
                           amount: '46.8750'
@@ -1232,10 +1289,20 @@ paths:
                           canonical_amount: 750000
                           canonical_currency: IDR
                         otp_code: null
+                        otp_message: null
+                        sms_revision: 0
                         otp_received_at: null
                         expires_at: '2026-05-11T09:20:00+00:00'
                         canceled_at: null
                         failed_reason: null
+                        can_finish: false
+                        can_resend: false
+                        can_cancel: false
+                        can_replace: false
+                        can_reactivate: false
+                        resend_available_at: null
+                        cancel_available_at: '2026-05-11T09:02:00+00:00'
+                        replace_available_at: '2026-05-11T09:02:00+00:00'
                     meta:
                       fx:
                         pair: USD/IDR
@@ -1282,11 +1349,22 @@ paths:
                     data:
                       - id: 90210
                         status: OTP_RECEIVED
-                        otp_code: '123456'
-                        otp_message: 'Your code is 123456'
+                        otp_code: null
+                        otp_message: 'Confirm your login: https://example.com/confirm'
+                        sms_revision: 1
                         otp_received_at: '2026-05-11T09:01:30+00:00'
                         expires_at: '2026-05-11T09:20:00+00:00'
                         failed_reason: null
+                        operator_id: 42
+                        operator_name: Telkomsel
+                        can_finish: true
+                        can_resend: true
+                        can_cancel: false
+                        can_replace: false
+                        can_reactivate: false
+                        resend_available_at: null
+                        cancel_available_at: null
+                        replace_available_at: null
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -1334,6 +1412,8 @@ paths:
                       created_at: '2026-05-11T09:00:00+00:00'
                       product_id: 1024
                       catalog_product_id: 88
+                      operator_id: 42
+                      operator_name: Telkomsel
                       phone_number: '+6281234567890'
                       amount:
                         amount: '46.8750'
@@ -1341,10 +1421,20 @@ paths:
                         canonical_amount: 750000
                         canonical_currency: IDR
                       otp_code: '123456'
+                      otp_message: 'Your code is 123456'
+                      sms_revision: 1
                       otp_received_at: '2026-05-11T09:01:30+00:00'
                       expires_at: '2026-05-11T09:20:00+00:00'
                       canceled_at: null
                       failed_reason: null
+                      can_finish: false
+                      can_resend: false
+                      can_cancel: false
+                      can_replace: false
+                      can_reactivate: false
+                      resend_available_at: null
+                      cancel_available_at: null
+                      replace_available_at: null
                     meta:
                       fx:
                         pair: USD/IDR
@@ -1436,11 +1526,21 @@ paths:
                           failed_reason: null
                           product_id: 1024
                           catalog_product_id: 88
+                          operator_id: 42
+                          operator_name: Telkomsel
                           amount:
                             amount: '46.8750'
                             currency: USD
                             canonical_amount: 750000
                             canonical_currency: IDR
+                          can_finish: false
+                          can_resend: false
+                          can_cancel: false
+                          can_replace: false
+                          can_reactivate: false
+                          resend_available_at: null
+                          cancel_available_at: '2026-05-11T09:02:00+00:00'
+                          replace_available_at: '2026-05-11T09:02:00+00:00'
                       failed_count: 0
                     meta:
                       fx:
@@ -1726,11 +1826,21 @@ paths:
                           failed_reason: null
                           product_id: 1024
                           catalog_product_id: 88
+                          operator_id: 42
+                          operator_name: Telkomsel
                           amount:
                             amount: '46.8750'
                             currency: USD
                             canonical_amount: 750000
                             canonical_currency: IDR
+                          can_finish: false
+                          can_resend: false
+                          can_cancel: false
+                          can_replace: false
+                          can_reactivate: false
+                          resend_available_at: null
+                          cancel_available_at: '2026-05-11T10:02:00+00:00'
+                          replace_available_at: '2026-05-11T10:02:00+00:00'
                       failed_count: 0
                     meta:
                       fx:
@@ -2132,9 +2242,12 @@ webhooks:
       operationId: onOrderEvent
       summary: Order lifecycle event (sent to your endpoint)
       description: >-
-        Sent to your configured `webhook_url` whenever one of your orders
-        transitions: an OTP arrives (`order.otp_received`) or the order reaches a
-        terminal state (`order.completed`, `order.expired`, `order.canceled`).
+        Sent to your configured `webhook_url` for every novel SMS delivery
+        (`order.otp_received`) and when the order reaches a terminal state
+        (`order.completed`, `order.expired`, `order.canceled`). A delivered SMS
+        may have `otp_code: null` with a non-null `otp_message`. Multiple SMS
+        events are self-consistent snapshots but may arrive out of order; do not
+        infer SMS chronology from webhook delivery order.
         Authenticated, when a `webhook_secret` is set, with the
         `X-Webhook-Signature` header — the lowercase-hex `sha256=<hmac>` of the
         **raw request body** keyed by your secret. Verify the signature, then
@@ -2159,6 +2272,32 @@ webhooks:
                     phone_number: '+6281234567890'
                     otp_code: '123456'
                     otp_message: 'Your code is 123456'
+                    sms_revision: 1
+                    product_id: 1024
+                    catalog_product_id: 88
+                    country: Indonesia
+                    platform: WhatsApp
+                    operator_id: 42
+                    operator_name: Telkomsel
+                    can_finish: true
+                    can_resend: true
+                    can_cancel: false
+                    can_replace: false
+                    can_reactivate: false
+                    resend_available_at: null
+                    cancel_available_at: null
+                    replace_available_at: null
+              sms_received_without_code:
+                summary: order.otp_received with text but no classified code
+                value:
+                  event: order.otp_received
+                  timestamp: '2026-05-11T09:06:00+00:00'
+                  data:
+                    order_id: 90210
+                    phone_number: '+6281234567890'
+                    otp_code: null
+                    otp_message: 'Confirm your login: https://example.com/confirm'
+                    sms_revision: 1
                     product_id: 1024
                     catalog_product_id: 88
                     country: Indonesia
@@ -2183,6 +2322,7 @@ webhooks:
                     phone_number: '+6281234567890'
                     otp_code: '123456'
                     otp_message: 'Your code is 123456'
+                    sms_revision: null
                     product_id: 1024
                     catalog_product_id: 88
                     country: Indonesia
@@ -2207,6 +2347,7 @@ webhooks:
                     phone_number: '+6281234567890'
                     otp_code: null
                     otp_message: null
+                    sms_revision: null
                     product_id: 1024
                     catalog_product_id: 88
                     country: Indonesia
@@ -2796,10 +2937,10 @@ components:
         - EXPIRED
       x-enum-descriptions:
         ACTIVE: A number is rented and waiting for an inbound SMS.
-        OTP_RECEIVED: The verification SMS arrived; the code is available.
-        COMPLETED: The order was finished and the SMS code consumed.
+        OTP_RECEIVED: The verification SMS arrived; the classified code may be null.
+        COMPLETED: The order was finished after SMS delivery.
         CANCELED: The order was canceled and (if eligible) refunded.
-        EXPIRED: The rental window elapsed without a usable SMS.
+        EXPIRED: The rental window elapsed before any SMS was delivered.
 
     OrderPolicy:
       type: string
@@ -2820,7 +2961,7 @@ components:
       description: >-
         A single order as returned by the list and get-by-id endpoints.
         `amount` is the charged price in **IDR** minor units (integer).
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, created_at, product_id, catalog_product_id, operator_id, operator_name, phone_number, amount, otp_code, otp_message, sms_revision, otp_received_at, expires_at, canceled_at, failed_reason, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2869,12 +3010,30 @@ components:
           examples: [750000]
         otp_code:
           type: [string, 'null']
-          description: The received verification code, when an SMS has arrived.
+          description: >-
+            The last classified verification code. It can remain `null` after
+            SMS delivery when no code is detected.
           examples: ['123456']
+        otp_message:
+          type: [string, 'null']
+          description: >-
+            The latest full received SMS body. It can be non-null while
+            `otp_code` is null when delivery succeeds without a classified code.
+          examples: ['Your code is 123456']
+        sms_revision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            Monotonic order-local revision of the aggregate `otp_code` and
+            `otp_message` pair. Consumers must ignore an older pair. A retained
+            code and the latest message may originate from different SMS
+            commits; do not assume they coexisted in one provider message.
+          examples: [1]
         otp_received_at:
           type: [string, 'null']
           format: date-time
-          description: RFC 3339 timestamp of when the verification SMS was received.
+          description: RFC 3339 timestamp of the first SMS delivery; later SMS messages do not rebase it.
           examples: ['2026-05-11T09:01:30+00:00']
         expires_at:
           type: [string, 'null']
@@ -2892,13 +3051,13 @@ components:
           examples: ['NoNumbers']
         can_finish:
           type: boolean
-          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+          description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
         can_cancel:
           type: boolean
-          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+          description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
@@ -2912,7 +3071,7 @@ components:
         cancel_available_at:
           type: [string, 'null']
           format: date-time
-          description: "When the min-cancel window clears; null when already clear or evidence exists."
+          description: "When the min-cancel window clears; null when already clear or SMS delivery evidence exists."
         replace_available_at:
           type: [string, 'null']
           format: date-time
@@ -2924,7 +3083,7 @@ components:
       description: >-
         A compact, money-free order status as returned by the active-orders
         endpoint (status and OTP fields only — no `amount`).
-      required: [id, status, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, otp_code, otp_message, sms_revision, otp_received_at, expires_at, failed_reason, operator_id, operator_name, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -2936,16 +3095,30 @@ components:
           $ref: '#/components/schemas/OrderStatusEnum'
         otp_code:
           type: [string, 'null']
-          description: The received verification code, when an SMS has arrived.
+          description: >-
+            The last classified verification code. It can remain `null` while
+            `otp_message` and `otp_received_at` are non-null.
           examples: ['123456']
         otp_message:
           type: [string, 'null']
-          description: The full received SMS message body, when available.
+          description: >-
+            The latest full received SMS body. It can be non-null while
+            `otp_code` is null when delivery succeeds without a classified code.
           examples: ['Your code is 123456']
+        sms_revision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            Monotonic order-local revision of the aggregate `otp_code` and
+            `otp_message` pair. Consumers must ignore an older pair. A retained
+            code and the latest message may originate from different SMS
+            commits; do not assume they coexisted in one provider message.
+          examples: [1]
         otp_received_at:
           type: [string, 'null']
           format: date-time
-          description: RFC 3339 timestamp of when the verification SMS was received.
+          description: RFC 3339 timestamp of the first SMS delivery; later SMS messages do not rebase it.
           examples: ['2026-05-11T09:01:30+00:00']
         expires_at:
           type: [string, 'null']
@@ -2956,15 +3129,24 @@ components:
           type: [string, 'null']
           description: A short reason when the order failed, when applicable.
           examples: ['NoNumbers']
+        operator_id:
+          type: [integer, 'null']
+          format: int32
+          description: The operator this tier belongs to; null for an `any` tier.
+          examples: [42]
+        operator_name:
+          type: [string, 'null']
+          description: Operator display name; null for an `any` tier.
+          examples: [Telkomsel]
         can_finish:
           type: boolean
-          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+          description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
         can_cancel:
           type: boolean
-          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+          description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
@@ -2978,7 +3160,7 @@ components:
         cancel_available_at:
           type: [string, 'null']
           format: date-time
-          description: "When the min-cancel window clears; null when already clear or evidence exists."
+          description: "When the min-cancel window clears; null when already clear or SMS delivery evidence exists."
         replace_available_at:
           type: [string, 'null']
           format: date-time
@@ -3055,7 +3237,7 @@ components:
         One created order in a `POST /v1/orders/create` result. `amount` is the
         charged price in **IDR** minor units. On a fresh create the OTP and
         failure fields are always `null`.
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, product_id, amount, otp_code, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -3110,13 +3292,13 @@ components:
           examples: [750000]
         can_finish:
           type: boolean
-          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+          description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
         can_cancel:
           type: boolean
-          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+          description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
@@ -3130,7 +3312,7 @@ components:
         cancel_available_at:
           type: [string, 'null']
           format: date-time
-          description: "When the min-cancel window clears; null when already clear or evidence exists."
+          description: "When the min-cancel window clears; null when already clear or SMS delivery evidence exists."
         replace_available_at:
           type: [string, 'null']
           format: date-time
@@ -3265,7 +3447,7 @@ components:
       description: >-
         Like `V1OrderSummary`, but `amount` is projected to a USD money object
         (4-decimal precision). All other fields are identical.
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, created_at, product_id, catalog_product_id, operator_id, operator_name, phone_number, amount, otp_code, otp_message, sms_revision, otp_received_at, expires_at, canceled_at, failed_reason, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -3307,12 +3489,30 @@ components:
           $ref: '#/components/schemas/V2Money'
         otp_code:
           type: [string, 'null']
-          description: The received verification code, when an SMS has arrived.
+          description: >-
+            The last classified verification code. It can remain `null` after
+            SMS delivery when no code is detected.
           examples: ['123456']
+        otp_message:
+          type: [string, 'null']
+          description: >-
+            The latest full received SMS body. It can be non-null while
+            `otp_code` is null when delivery succeeds without a classified code.
+          examples: ['Your code is 123456']
+        sms_revision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            Monotonic order-local revision of the aggregate `otp_code` and
+            `otp_message` pair. Consumers must ignore an older pair. A retained
+            code and the latest message may originate from different SMS
+            commits; do not assume they coexisted in one provider message.
+          examples: [1]
         otp_received_at:
           type: [string, 'null']
           format: date-time
-          description: RFC 3339 timestamp of when the verification SMS was received.
+          description: RFC 3339 timestamp of the first SMS delivery; later SMS messages do not rebase it.
           examples: ['2026-05-11T09:01:30+00:00']
         expires_at:
           type: [string, 'null']
@@ -3330,13 +3530,13 @@ components:
           examples: ['NoNumbers']
         can_finish:
           type: boolean
-          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+          description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
         can_cancel:
           type: boolean
-          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+          description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
@@ -3350,7 +3550,7 @@ components:
         cancel_available_at:
           type: [string, 'null']
           format: date-time
-          description: "When the min-cancel window clears; null when already clear or evidence exists."
+          description: "When the min-cancel window clears; null when already clear or SMS delivery evidence exists."
         replace_available_at:
           type: [string, 'null']
           format: date-time
@@ -3426,7 +3626,7 @@ components:
         Like `V1CreateOrderItem`, but `amount` is a USD money object (4-decimal
         precision). On a fresh create the OTP and failure fields are always
         `null`.
-      required: [id, status, product_id, amount, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
+      required: [id, status, product_id, amount, otp_code, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         id:
@@ -3478,13 +3678,13 @@ components:
           $ref: '#/components/schemas/V2Money'
         can_finish:
           type: boolean
-          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+          description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
         can_cancel:
           type: boolean
-          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+          description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
@@ -3498,7 +3698,7 @@ components:
         cancel_available_at:
           type: [string, 'null']
           format: date-time
-          description: "When the min-cancel window clears; null when already clear or evidence exists."
+          description: "When the min-cancel window clears; null when already clear or SMS delivery evidence exists."
         replace_available_at:
           type: [string, 'null']
           format: date-time
@@ -3720,7 +3920,7 @@ components:
             - order.expired
             - order.canceled
           x-enum-descriptions:
-            order.otp_received: An OTP/verification code arrived for the order.
+            order.otp_received: A novel SMS arrived; the parsed code may be null.
             order.completed: The order was completed.
             order.expired: The order expired before completion.
             order.canceled: The order was canceled (and refunded).
@@ -3740,11 +3940,12 @@ components:
       # Every field is `required`: the producer (webhook_notifier::webhook_data_payload)
       # emits ALL keys present for EVERY event — non-null values or an explicit JSON
       # `null` (never an absent key). `phone_number`, `otp_code`, `otp_message`,
+      # `sms_revision`,
       # `catalog_product_id`, `country`, `platform` are required-but-nullable (Option<_>
       # in the producer's OrderDetail), matching operator_id/operator_name + the
       # *_available_at timestamps. So a consumer generated from this schema rejects a
       # payload that DROPS any key, matching the runtime contract exactly.
-      required: [order_id, phone_number, otp_code, otp_message, product_id, catalog_product_id, country, platform, operator_id, operator_name, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
+      required: [order_id, phone_number, otp_code, otp_message, sms_revision, product_id, catalog_product_id, country, platform, operator_id, operator_name, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
       additionalProperties: false
       properties:
         order_id:
@@ -3759,13 +3960,26 @@ components:
         otp_code:
           type: [string, 'null']
           description: >-
-            The parsed verification code. Present on `order.otp_received`; `null`
-            otherwise (or when not yet parsed).
+            The aggregate parsed verification code as of this SMS commit. It may
+            be `null` on `order.otp_received` when the delivered message has no
+            classifiable code, or retain an earlier valid code on a later
+            no-code SMS.
           examples: ['123456']
         otp_message:
           type: [string, 'null']
-          description: The full received SMS text, when available.
+          description: >-
+            The exact SMS text for this `order.otp_received` commit, when
+            available. It can be non-null while `otp_code` is null.
           examples: ['Your code is 123456']
+        sms_revision:
+          type: [integer, 'null']
+          format: int64
+          minimum: 0
+          description: >-
+            Monotonic order-local revision for this `order.otp_received`
+            snapshot. Terminal events carry `null`. Delivery remains unordered,
+            so consumers must reject an older code/message pair.
+          examples: [1]
         product_id:
           type: integer
           format: int32
@@ -3800,13 +4014,13 @@ components:
           examples: [Telkomsel]
         can_finish:
           type: boolean
-          description: "Server-authoritative: the order can be finished (OTP evidence + non-terminal)."
+          description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
         can_cancel:
           type: boolean
-          description: "Server-authoritative: cancel allowed (no evidence + ACTIVE + past min-cancel window)."
+          description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
         can_replace:
           type: boolean
           description: "Server-authoritative: replace allowed (== can_cancel)."
@@ -3820,7 +4034,7 @@ components:
         cancel_available_at:
           type: [string, 'null']
           format: date-time
-          description: "When the min-cancel window clears; null when already clear or evidence exists."
+          description: "When the min-cancel window clears; null when already clear or SMS delivery evidence exists."
         replace_available_at:
           type: [string, 'null']
           format: date-time

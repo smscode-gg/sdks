@@ -185,6 +185,27 @@ describe("parseWebhookEvent — typed discriminated union", () => {
     }
   });
 
+  it("preserves a no-code SMS as otp_code=null with otp_message", () => {
+    const raw = {
+      event: "order.otp_received",
+      timestamp: "2026-05-11T09:05:00+00:00",
+      data: {
+        order_id: 90210,
+        otp_code: null,
+        otp_message: "Confirm your login: https://example.com/confirm",
+        sms_revision: 1,
+      },
+    };
+    const evt = parseWebhookEvent(JSON.stringify(raw));
+    if (evt.event === "order.otp_received") {
+      expect(evt.data.otp_code).toBeNull();
+      expect(evt.data.otp_message).toBe(raw.data.otp_message);
+      expect(evt.data.sms_revision).toBe(1);
+    } else {
+      throw new Error("expected order.otp_received to narrow");
+    }
+  });
+
   it("accepts the webhook.test event shape", () => {
     const raw = {
       event: "webhook.test",
