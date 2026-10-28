@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
+# The project version as installed in this environment (from pyproject.toml), so a
+# release bump never needs a test edit. tomllib is not used: Python 3.10 lacks it.
+VERSION = importlib.metadata.version("smscode")
 DISALLOWED_PARTS = {
     "dist",
     "build",
@@ -28,8 +32,8 @@ def test_wheel_sdist_contents_and_installed_imports(tmp_path: Path) -> None:
         [sys.executable, "-m", "twine", "check", "--strict", *DIST.iterdir()], check=True
     )
 
-    wheel = next(DIST.glob("smscode-1.2.0-py3-none-any.whl"))
-    sdist = next(DIST.glob("smscode-1.2.0.tar.gz"))
+    wheel = next(DIST.glob(f"smscode-{VERSION}-py3-none-any.whl"))
+    sdist = next(DIST.glob(f"smscode-{VERSION}.tar.gz"))
 
     inspect_wheel(wheel)
     inspect_sdist(sdist)
@@ -81,7 +85,7 @@ def smoke_install_wheel(wheel: Path, tmp_path: Path) -> None:
                 "import importlib.metadata as metadata; "
                 "from smscode import VERSION, AsyncSmscodeClient, SmscodeClient, "
                 "verify_webhook_signature; "
-                "assert VERSION == '1.2.0'; "
+                f"assert VERSION == {VERSION!r}; "
                 "assert SmscodeClient.__name__ == 'SmscodeClient'; "
                 "assert AsyncSmscodeClient.__name__ == 'AsyncSmscodeClient'; "
                 "assert callable(verify_webhook_signature); "

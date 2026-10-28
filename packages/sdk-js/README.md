@@ -119,7 +119,8 @@ const next = await client.orders.waitForOtp(order.id, {
 });
 console.log("latest SMS:", next.order.otp_message);
 // `next.otpCode` can equal the old code when the follow-up had no classified
-// code. Inspect the exact message, then finish — do not cancel after delivery.
+// code. Inspect the exact message after U+0000 removal, then finish — do not
+// cancel after delivery.
 await client.orders.finish(order.id);
 ```
 

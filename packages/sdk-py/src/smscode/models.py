@@ -92,6 +92,9 @@ class OrderCapabilities:
     resend_available_at: str | None = None
     cancel_available_at: str | None = None
     replace_available_at: str | None = None
+    # How further SMS reach the order ("auto" or "manual"). Sent on /v2 order
+    # reads; None where the response does not carry it (e.g. /v1).
+    resend_mode: str | None = None
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,7 @@ export interface WaitForOtpOptions {
    * Resend baseline for SMS delivery. When set, a retained `otp_code` becomes
    * usable once `sms_revision` advances beyond this value, even when the new SMS
    * has no classified code of its own. Pass the revision observed before
-   * `resend`; inspect `result.order.otp_message` for the exact latest SMS.
+   * `resend`; inspect the latest `result.order.otp_message` after U+0000 removal.
    */
   afterRevision?: number;
   /** Wait clock. Defaults to a `setTimeout`-backed sleep. Injectable for tests. */

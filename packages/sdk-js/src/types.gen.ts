@@ -1245,7 +1245,7 @@ export interface components {
              */
             otp_code: string | null;
             /**
-             * @description The latest full received SMS body. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
+             * @description The latest received SMS body after U+0000 removal. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
              * @example Your code is 123456
              */
             otp_message: string | null;
@@ -1280,7 +1280,7 @@ export interface components {
             failed_reason: string | null;
             /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling. */
             can_resend: boolean;
             /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
@@ -1322,7 +1322,7 @@ export interface components {
              */
             otp_code: string | null;
             /**
-             * @description The latest full received SMS body. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
+             * @description The latest received SMS body after U+0000 removal. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
              * @example Your code is 123456
              */
             otp_message: string | null;
@@ -1362,7 +1362,7 @@ export interface components {
             operator_name: string | null;
             /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling. */
             can_resend: boolean;
             /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
@@ -1495,7 +1495,7 @@ export interface components {
             amount: number;
             /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling. */
             can_resend: boolean;
             /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
@@ -1584,7 +1584,7 @@ export interface components {
             order_id: number;
             status: components["schemas"]["OrderStatusEnum"];
             /**
-             * @description Whether the resend request was accepted and dispatched.
+             * @description Whether the resend request was accepted and dispatched. `false` means nothing was sent: on an order whose additional SMS arrive automatically, a resend is a successful no-op.
              * @example true
              */
             resent: boolean;
@@ -1621,7 +1621,7 @@ export interface components {
         };
         /**
          * V2OrderSummary
-         * @description Like `V1OrderSummary`, but `amount` is projected to a USD money object (4-decimal precision). All other fields are identical.
+         * @description Like `V1OrderSummary`, but `amount` is projected to a USD money object (4-decimal precision), and the order adds `resend_mode`.
          */
         V2OrderSummary: {
             /**
@@ -1672,7 +1672,7 @@ export interface components {
              */
             otp_code: string | null;
             /**
-             * @description The latest full received SMS body. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
+             * @description The latest received SMS body after U+0000 removal. It can be non-null while `otp_code` is null when delivery succeeds without a classified code.
              * @example Your code is 123456
              */
             otp_message: string | null;
@@ -1707,7 +1707,7 @@ export interface components {
             failed_reason: string | null;
             /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling. */
             can_resend: boolean;
             /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
@@ -1730,6 +1730,12 @@ export interface components {
              * @description == cancel_available_at.
              */
             replace_available_at: string | null;
+            /**
+             * @description How further SMS reach this order. It is not a permission. `auto`: the provider delivers further SMS by itself, so the order has no resend action; `can_resend` is always false and a resend call returns `resent: false`. `manual`: an eligible order can explicitly request another SMS through the resend action; this does not promise that no unsolicited SMS arrives. `can_resend` is the current permission, and `resend_available_at` is only a cooldown hint.
+             * @example manual
+             * @enum {string}
+             */
+            resend_mode: "auto" | "manual";
         };
         /**
          * V2CreateOrderRequest
@@ -1833,7 +1839,7 @@ export interface components {
             amount: components["schemas"]["V2Money"];
             /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling. */
             can_resend: boolean;
             /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;
@@ -2025,7 +2031,7 @@ export interface components {
              */
             otp_code: string | null;
             /**
-             * @description The exact SMS text for this `order.otp_received` commit, when available. It can be non-null while `otp_code` is null.
+             * @description The exact SMS text after U+0000 removal for this `order.otp_received` commit, when available. It can be non-null while `otp_code` is null.
              * @example Your code is 123456
              */
             otp_message: string | null;
@@ -2070,7 +2076,7 @@ export interface components {
             operator_name: string | null;
             /** @description Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal). */
             can_finish: boolean;
-            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). */
+            /** @description Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling. */
             can_resend: boolean;
             /** @description Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window). */
             can_cancel: boolean;

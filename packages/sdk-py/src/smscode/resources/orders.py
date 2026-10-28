@@ -69,7 +69,14 @@ def _capabilities(raw: Mapping[str, Any], *, label: str) -> OrderCapabilities:
         resend_available_at=raw["resend_available_at"],
         cancel_available_at=raw["cancel_available_at"],
         replace_available_at=raw["replace_available_at"],
+        resend_mode=_resend_mode(raw),
     )
+
+
+def _resend_mode(raw: Mapping[str, Any]) -> str | None:
+    # Optional and lenient: absent on /v1, and absent during an API rollback.
+    value = raw.get("resend_mode")
+    return value if isinstance(value, str) else None
 
 
 def _decode_v2_order(raw: object, fx: V2Fx, *, created: bool = False) -> Order:

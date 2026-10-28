@@ -62,6 +62,21 @@ info:
     (not `null`) otherwise.
 
 
+    ## Compatibility
+
+
+    This API changes additively.
+
+
+    - Responses and webhook event payloads may gain new fields at any time,
+      without a version change. Ignore fields you do not recognize; never reject a
+      response or a webhook because it carries an unknown key.
+    - Request bodies: send only the documented fields. Request schemas are closed
+      (`additionalProperties: false`), so a key outside them is not part of the
+      contract.
+    - Removing or renaming a field, or changing its type or meaning, only happens
+      on a new versioned surface.
+
     ## Idempotency
 
 
@@ -1303,6 +1318,7 @@ paths:
                         resend_available_at: null
                         cancel_available_at: '2026-05-11T09:02:00+00:00'
                         replace_available_at: '2026-05-11T09:02:00+00:00'
+                        resend_mode: manual
                     meta:
                       fx:
                         pair: USD/IDR
@@ -1435,6 +1451,7 @@ paths:
                       resend_available_at: null
                       cancel_available_at: null
                       replace_available_at: null
+                      resend_mode: manual
                     meta:
                       fx:
                         pair: USD/IDR
@@ -2458,7 +2475,7 @@ components:
       required:
         - code
         - message
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         code:
           $ref: '#/components/schemas/ErrorCode'
@@ -2487,7 +2504,7 @@ components:
       required:
         - success
         - error
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         success:
           const: false
@@ -2537,7 +2554,7 @@ components:
       title: V1Country
       description: A country in the catalog.
       required: [id, name, active]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -2570,7 +2587,7 @@ components:
       title: V1Service
       description: A service (platform) you can rent a number for, e.g. WhatsApp.
       required: [id, code, name, active]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -2595,7 +2612,7 @@ components:
       title: V1Operator
       description: An operator (carrier) in a country, e.g. Telkomsel. Listed only when it has in-stock tiers. The synthesized `any` entry carries a null `operator_id`.
       required: [operator_id, code]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         operator_id:
           type: [integer, 'null']
@@ -2621,7 +2638,7 @@ components:
         An orderable product — a service in a country at a price. `price` is in
         **IDR** minor units (integer), the canonical ledger currency.
       required: [id, available, price, active]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -2686,7 +2703,7 @@ components:
       title: V1ExchangeRate
       description: A stored exchange rate for a currency pair.
       required: [pair, base_currency, quote_currency, rate]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         pair:
           type: string
@@ -2713,7 +2730,7 @@ components:
       title: V1Balance
       description: The authenticated account's balance, in IDR.
       required: [currency, balance]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         currency:
           type: string
@@ -2730,7 +2747,7 @@ components:
       title: PaginationMeta
       description: Pagination metadata for a `/v1` list response.
       required: [page, limit, count]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         page:
           type: integer
@@ -2760,7 +2777,7 @@ components:
         avoid precision loss); the canonical fields are the exact IDR minor
         units the USD value was projected from.
       required: [amount, currency, canonical_amount, canonical_currency]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         amount:
           type: string
@@ -2790,7 +2807,7 @@ components:
         The per-response FX receipt — the USD/IDR rate used to project every
         money value in the response.
       required: [pair, rate, rate_as_of]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         pair:
           type: string
@@ -2816,7 +2833,7 @@ components:
       title: V2Meta
       description: The `meta` envelope for a `/v2` money response — carries the FX receipt.
       required: [fx]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         fx:
           $ref: '#/components/schemas/V2Fx'
@@ -2828,7 +2845,7 @@ components:
         Like `V1Product`, but the IDR `price` is projected to a USD money
         object (4-decimal precision). All other fields are identical.
       required: [id, available, price, active]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -2892,7 +2909,7 @@ components:
         The `meta` for a `/v2` products response — flat pagination plus the FX
         receipt used for every projected `price` in the page.
       required: [page, limit, count, fx]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         page:
           type: integer
@@ -2918,7 +2935,7 @@ components:
       title: V2Balance
       description: The authenticated account's balance, USD-projected over the IDR ledger.
       required: [balance]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         balance:
           $ref: '#/components/schemas/V2Money'
@@ -2962,7 +2979,7 @@ components:
         A single order as returned by the list and get-by-id endpoints.
         `amount` is the charged price in **IDR** minor units (integer).
       required: [id, status, created_at, product_id, catalog_product_id, operator_id, operator_name, phone_number, amount, otp_code, otp_message, sms_revision, otp_received_at, expires_at, canceled_at, failed_reason, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -3017,8 +3034,9 @@ components:
         otp_message:
           type: [string, 'null']
           description: >-
-            The latest full received SMS body. It can be non-null while
-            `otp_code` is null when delivery succeeds without a classified code.
+            The latest received SMS body after U+0000 removal. It can be
+            non-null while `otp_code` is null when delivery succeeds without a
+            classified code.
           examples: ['Your code is 123456']
         sms_revision:
           type: integer
@@ -3054,7 +3072,7 @@ components:
           description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling."
         can_cancel:
           type: boolean
           description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
@@ -3084,7 +3102,7 @@ components:
         A compact, money-free order status as returned by the active-orders
         endpoint (status and OTP fields only — no `amount`).
       required: [id, status, otp_code, otp_message, sms_revision, otp_received_at, expires_at, failed_reason, operator_id, operator_name, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -3102,8 +3120,9 @@ components:
         otp_message:
           type: [string, 'null']
           description: >-
-            The latest full received SMS body. It can be non-null while
-            `otp_code` is null when delivery succeeds without a classified code.
+            The latest received SMS body after U+0000 removal. It can be
+            non-null while `otp_code` is null when delivery succeeds without a
+            classified code.
           examples: ['Your code is 123456']
         sms_revision:
           type: integer
@@ -3143,7 +3162,7 @@ components:
           description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling."
         can_cancel:
           type: boolean
           description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
@@ -3238,7 +3257,7 @@ components:
         charged price in **IDR** minor units. On a fresh create the OTP and
         failure fields are always `null`.
       required: [id, status, product_id, amount, otp_code, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -3295,7 +3314,7 @@ components:
           description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling."
         can_cancel:
           type: boolean
           description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
@@ -3323,7 +3342,7 @@ components:
       title: V1CreateOrderResult
       description: The result of a `POST /v1/orders/create` call.
       required: [orders, failed_count]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         orders:
           type: array
@@ -3344,7 +3363,7 @@ components:
         The result of a `POST /v1/orders/cancel` call. Money fields are in
         **IDR** minor units (integer).
       required: [order_id, status, refund_amount, new_balance]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         order_id:
           type: integer
@@ -3370,7 +3389,7 @@ components:
       title: V1FinishOrderResult
       description: The result of a `POST /v1/orders/finish` call.
       required: [order_id, status]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         order_id:
           type: integer
@@ -3385,7 +3404,7 @@ components:
       title: V1ResendResult
       description: The result of a `POST /v1/orders/resend` call.
       required: [order_id, status, resent]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         order_id:
           type: integer
@@ -3396,7 +3415,10 @@ components:
           $ref: '#/components/schemas/OrderStatusEnum'
         resent:
           type: boolean
-          description: Whether the resend request was accepted and dispatched.
+          description: >-
+            Whether the resend request was accepted and dispatched. `false` means
+            nothing was sent: on an order whose additional SMS arrive automatically,
+            a resend is a successful no-op.
           examples: [true]
 
     V1ReactivateRequest:
@@ -3430,7 +3452,7 @@ components:
         The result of `GET /v1/orders/{id}/reactivate-options` — a read-only
         quote for the current reactivation cost in **IDR** minor units.
       required: [cost]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         cost:
           type: integer
@@ -3446,9 +3468,9 @@ components:
       title: V2OrderSummary
       description: >-
         Like `V1OrderSummary`, but `amount` is projected to a USD money object
-        (4-decimal precision). All other fields are identical.
-      required: [id, status, created_at, product_id, catalog_product_id, operator_id, operator_name, phone_number, amount, otp_code, otp_message, sms_revision, otp_received_at, expires_at, canceled_at, failed_reason, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
-      additionalProperties: false
+        (4-decimal precision), and the order adds `resend_mode`.
+      required: [id, status, created_at, product_id, catalog_product_id, operator_id, operator_name, phone_number, amount, otp_code, otp_message, sms_revision, otp_received_at, expires_at, canceled_at, failed_reason, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at, resend_mode]
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -3496,8 +3518,9 @@ components:
         otp_message:
           type: [string, 'null']
           description: >-
-            The latest full received SMS body. It can be non-null while
-            `otp_code` is null when delivery succeeds without a classified code.
+            The latest received SMS body after U+0000 removal. It can be
+            non-null while `otp_code` is null when delivery succeeds without a
+            classified code.
           examples: ['Your code is 123456']
         sms_revision:
           type: integer
@@ -3533,7 +3556,7 @@ components:
           description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling."
         can_cancel:
           type: boolean
           description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
@@ -3555,6 +3578,18 @@ components:
           type: [string, 'null']
           format: date-time
           description: "== cancel_available_at."
+        resend_mode:
+          type: string
+          enum: [auto, manual]
+          description: >-
+            How further SMS reach this order. It is not a permission. `auto`: the
+            provider delivers further SMS by itself, so the order has no resend
+            action; `can_resend` is always false and a resend call returns
+            `resent: false`. `manual`: an eligible order can explicitly request
+            another SMS through the resend action; this does not promise that no
+            unsolicited SMS arrives. `can_resend` is the current permission, and
+            `resend_available_at` is only a cooldown hint.
+          examples: [manual]
 
     V2CreateOrderRequest:
       type: object
@@ -3627,7 +3662,7 @@ components:
         precision). On a fresh create the OTP and failure fields are always
         `null`.
       required: [id, status, product_id, amount, otp_code, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         id:
           type: integer
@@ -3681,7 +3716,7 @@ components:
           description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling."
         can_cancel:
           type: boolean
           description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
@@ -3709,7 +3744,7 @@ components:
       title: V2CreateOrderResult
       description: The result of a `POST /v2/orders/create` call.
       required: [orders, failed_count]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         orders:
           type: array
@@ -3733,7 +3768,7 @@ components:
         is a wallet total (2-decimal). Mixed precision in one response is
         intentional and allowed by the `/v2` money contract.
       required: [order_id, status, refund_amount, new_balance]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         order_id:
           type: integer
@@ -3780,7 +3815,7 @@ components:
         quote for the current reactivation cost as a USD money object
         (4-decimal), carried with an `meta.fx` receipt.
       required: [cost]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         cost:
           $ref: '#/components/schemas/V2Money'
@@ -3815,7 +3850,7 @@ components:
         - webhook_disabled_at
         - webhook_disabled_reason
         - webhook_consecutive_failures
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         webhook_url:
           type: [string, 'null']
@@ -3887,7 +3922,7 @@ components:
       title: WebhookTestResult
       description: The result of `POST /webhook/test`.
       required: [status_code]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         status_code:
           type: integer
@@ -3909,7 +3944,7 @@ components:
         HMAC-SHA256 of the **raw request body** keyed by your secret. Verify it
         before trusting the payload.
       required: [event, timestamp, data]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         event:
           type: string
@@ -3946,7 +3981,7 @@ components:
       # *_available_at timestamps. So a consumer generated from this schema rejects a
       # payload that DROPS any key, matching the runtime contract exactly.
       required: [order_id, phone_number, otp_code, otp_message, sms_revision, product_id, catalog_product_id, country, platform, operator_id, operator_name, can_finish, can_resend, can_cancel, can_replace, can_reactivate, resend_available_at, cancel_available_at, replace_available_at]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         order_id:
           type: integer
@@ -3968,8 +4003,9 @@ components:
         otp_message:
           type: [string, 'null']
           description: >-
-            The exact SMS text for this `order.otp_received` commit, when
-            available. It can be non-null while `otp_code` is null.
+            The exact SMS text after U+0000 removal for this
+            `order.otp_received` commit, when available. It can be non-null
+            while `otp_code` is null.
           examples: ['Your code is 123456']
         sms_revision:
           type: [integer, 'null']
@@ -4017,7 +4053,7 @@ components:
           description: "Server-authoritative: the order can be finished (SMS delivery evidence + non-terminal)."
         can_resend:
           type: boolean
-          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear)."
+          description: "Server-authoritative: resend allowed (SMS delivery evidence + non-terminal + not expired + cooldown clear). Always false on an order whose additional SMS arrive automatically: it needs no resend, so keep polling."
         can_cancel:
           type: boolean
           description: "Server-authoritative: cancel allowed (no SMS delivery evidence + ACTIVE + past min-cancel window)."
@@ -4048,7 +4084,7 @@ components:
         same way as `WebhookEvent` (the `X-Webhook-Signature` header, when a
         secret is set).
       required: [event, timestamp, data]
-      additionalProperties: false
+      x-smscode-tested-closed: true
       properties:
         event:
           type: string
@@ -4062,7 +4098,7 @@ components:
           examples: ['2026-05-11T09:05:00+00:00']
         data:
           type: object
-          additionalProperties: false
+          x-smscode-tested-closed: true
           required: [message]
           description: A fixed marker payload.
           properties:

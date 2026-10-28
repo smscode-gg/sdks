@@ -32,6 +32,7 @@ import type { ValidateFunction } from "ajv";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SmscodeClient } from "../src/client.js";
+import { policyCounts, policyViolations, strictView } from "./openapi-policy.js";
 import {
   SmscodeError,
   UnauthorizedError,
@@ -79,7 +80,10 @@ function escapePointer(token: string): string {
  * internal `#/components/schemas/...` `$ref` resolves. Compilation helpers then
  * target a specific node by `$ref`. Pure + offline — see the unit test below.
  */
-export function buildContractHarness(openapiYaml: string): {
+export function buildContractHarness(
+  openapiYaml: string,
+  options: { view?: "strict" | "published" } = {},
+): {
   /** Compile the `application/json` schema for a `{status}` response of an operation. */
   responseValidator: (
     path: string,
@@ -97,9 +101,12 @@ export function buildContractHarness(openapiYaml: string): {
   // constructed, so this is a pure data load (js-yaml v4's `load` is already
   // safe — `safeLoad`/the unsafe loader was removed in v4 — and `JSON_SCHEMA`
   // makes that explicit). The input is the in-repo OpenAPI doc regardless.
-  const doc = yaml.load(openapiYaml, {
+  const published = yaml.load(openapiYaml, {
     schema: yaml.JSON_SCHEMA,
   }) as Record<string, unknown>;
+  // Our own payloads and examples are checked against the strict view; only the
+  // policy tests read the published, open contract (see ./openapi-policy.ts).
+  const doc = (options.view ?? "strict") === "strict" ? strictView(published) : published;
 
   const ajv = new Ajv2020({
     // OpenAPI 3.1 schemas carry annotations ajv's strict mode would reject
@@ -150,6 +157,471 @@ export function buildContractHarness(openapiYaml: string): {
     },
   };
 }
+
+// ───── strict view: the tested-closed marker reads as additionalProperties:false ─────
+describe("strict view of the published contract", () => {
+  const doc = {
+    openapi: "3.1.0",
+    info: { title: "strict-view fixture", version: "0" },
+    paths: {},
+    components: {
+      schemas: {
+        Marked: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          "x-smscode-tested-closed": true,
+        },
+        Unmarked: {
+          type: "object",
+          properties: { a: { type: "string" } },
+        },
+      },
+    },
+  };
+  const extra = { a: "x", b: 1 };
+
+  it("strict view closes a marker-carrying schema and leaves unmarked ones open", () => {
+    const strict = buildContractHarness(JSON.stringify(doc));
+    expect(strict.schemaValidator("Marked")(extra)).toBe(false);
+    expect(strict.schemaValidator("Unmarked")(extra)).toBe(true);
+
+    const published = buildContractHarness(JSON.stringify(doc), { view: "published" });
+    expect(published.schemaValidator("Marked")(extra)).toBe(true);
+    expect(published.schemaValidator("Unmarked")(extra)).toBe(true);
+  });
+});
+
+// ───── compatibility policy lock ─────
+describe("compatibility policy lock", () => {
+  const load = (): Record<string, unknown> =>
+    yaml.load(readFileSync(OPENAPI_PATH, "utf8"), {
+      schema: yaml.JSON_SCHEMA,
+    }) as Record<string, unknown>;
+  type Obj = Record<string, unknown>;
+  /** Walk `path` from `root`; the mutants only address nodes that exist. */
+  const at = (root: unknown, ...path: string[]): Obj => {
+    let node = root;
+    for (const key of path) node = (node as Obj)[key];
+    return node as Obj;
+  };
+  const firstEnvelopeBranch = (doc: Obj): Obj => {
+    for (const item of Object.values(at(doc, "paths"))) {
+      for (const op of Object.values(item as Obj)) {
+        for (const resp of Object.values(((op as Obj).responses ?? {}) as Obj)) {
+          const media = ((resp as Obj).content as Obj | undefined)?.["application/json"] as Obj | undefined;
+          const branches = (media?.schema as Obj | undefined)?.allOf as Obj[] | undefined;
+          if (branches?.some((b) => b.$ref === "#/components/schemas/SuccessEnvelope")) {
+            const branch = branches.find((b) => !b.$ref && b.properties);
+            if (branch) return branch;
+          }
+        }
+      }
+    }
+    throw new Error("no SuccessEnvelope allOf branch found");
+  };
+
+  it("the published document satisfies the policy lock", () => {
+    expect(policyViolations(load())).toEqual([]);
+  });
+
+  it("the lock classifies 73 object-shaped server-sent nodes", () => {
+    expect(policyCounts(load())).toEqual({ marked: 34, envelopeBranches: 36, envelope: 1, openMaps: 2 });
+  });
+
+  const mutants: Array<[string, string, (doc: Record<string, unknown>) => void]> = [
+    ["a new referenced component without the marker", "#/components/schemas/NewThing: unclassified", (doc) => {
+      at(doc, "components", "schemas").NewThing = { type: "object", properties: { a: { type: "string" } } };
+      at(doc, "components", "schemas", "V2Balance", "properties").extra = { $ref: "#/components/schemas/NewThing" };
+    }],
+    ["a new inline object inside a response data", "V2Balance/properties/nested: unclassified", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").nested = {
+        type: "object",
+        properties: { b: { type: "string" } },
+      };
+    }],
+    ["a third top-level key in an envelope branch", "/allOf/1: unclassified", (doc) => {
+      at(firstEnvelopeBranch(doc), "properties").extra = { type: "string" };
+    }],
+    ["additionalProperties false on a server-sent schema", "V2Balance: additionalProperties false outside the request schemas", (doc) => {
+      at(doc, "components", "schemas", "V2Balance").additionalProperties = false;
+    }],
+    ["the marker on a request schema", "V2CreateOrderRequest: request schema carries the tested-closed marker", (doc) => {
+      at(doc, "components", "schemas", "V2CreateOrderRequest")["x-smscode-tested-closed"] = true;
+    }],
+    ["a newly referenced schema that is only type object", "#/components/schemas/Bare: unclassified", (doc) => {
+      at(doc, "components", "schemas").Bare = { type: "object" };
+      at(doc, "components", "schemas", "V2Balance", "properties").bare = { $ref: "#/components/schemas/Bare" };
+    }],
+    ["patternProperties on a reached node", "V2Money: unsupported keyword patternProperties", (doc) => {
+      at(doc, "components", "schemas", "V2Money").patternProperties = { "^x": { type: "string" } };
+    }],
+    // OpenAPI 3.1 applies $ref siblings, so the walk must read them.
+    ["a patternProperties sibling of a reached $ref", "V2Balance/properties/balance: unsupported keyword patternProperties", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties", "balance").patternProperties = { "^x": { type: "string" } };
+    }],
+    ["an unmarked object beside a reached $ref", "V2Balance/properties/balance: unclassified", (doc) => {
+      Object.assign(at(doc, "components", "schemas", "V2Balance", "properties", "balance"), {
+        type: "object",
+        properties: { y: { type: "string" } },
+      });
+    }],
+    // The walk follows only local $ref; anything else fails closed.
+    ["a $dynamicRef in a reached schema", "V2Money: unsupported keyword $dynamicRef", (doc) => {
+      at(doc, "components", "schemas", "V2Money").$dynamicRef = "#money";
+    }],
+    ...(["options", "head", "trace"] as const).map(
+      (method): [string, string, (doc: Record<string, unknown>) => void] => [
+        `an unmarked object in a ${method} response`,
+        `/${method}/responses/200/content/application~1json/schema: unclassified`,
+        (doc) => {
+          at(doc, "paths", "/v1/balance")[method] = {
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "object", properties: { a: { type: "string" } } } } },
+              },
+            },
+          };
+        },
+      ],
+    ),
+    ["an open inline request body on a new operation", "#/paths/~1v2~1widgets/post/requestBody/content/application~1json/schema: request body must $ref a closed request schema", (doc) => {
+      at(doc, "paths")["/v2/widgets"] = {
+        post: {
+          requestBody: {
+            content: { "application/json": { schema: { type: "object", properties: { a: { type: "string" } } } } },
+          },
+          responses: { "204": { description: "ok" } },
+        },
+      };
+    }],
+    ["a request body that references a response schema", "#/paths/~1v2~1orders~1create/post/requestBody/content/application~1json/schema: request body must $ref a closed request schema", (doc) => {
+      at(doc, "paths", "/v2/orders/create", "post", "requestBody", "content", "application/json").schema = {
+        $ref: "#/components/schemas/V2Balance",
+      };
+    }],
+    ["a request body with no media types", "#/paths/~1v2~1orders~1create/post/requestBody: request body must $ref a closed request schema", (doc) => {
+      at(doc, "paths", "/v2/orders/create", "post").requestBody = { content: {} };
+    }],
+    ["a shared request body that wraps a response schema", "#/components/requestBodies/Shared/content/application~1json/schema: request body must $ref a closed request schema", (doc) => {
+      at(doc, "components").requestBodies = {
+        Shared: { content: { "application/json": { schema: { $ref: "#/components/schemas/V2Balance" } } } },
+      };
+      at(doc, "paths", "/v2/orders/create", "post").requestBody = { $ref: "#/components/requestBodies/Shared" };
+    }],
+    // maxProperties caps additive fields; contentSchema hides a nested schema.
+    ["maxProperties on a reached node", "V2Money: unsupported keyword maxProperties", (doc) => {
+      at(doc, "components", "schemas", "V2Money").maxProperties = 4;
+    }],
+    ["contentSchema on a reached string", "V2Money/properties/amount: unsupported keyword contentSchema", (doc) => {
+      Object.assign(at(doc, "components", "schemas", "V2Money", "properties", "amount"), {
+        contentMediaType: "application/json",
+        contentSchema: { type: "object", properties: { a: { type: "string" } } },
+      });
+    }],
+    ["a required-only object shape", "V2Balance/properties/shape: unclassified", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").shape = { required: ["a"] };
+    }],
+    ["an object-valued const", "V2Balance/properties/fixed: object-valued const or enum", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").fixed = { const: { a: 1 } };
+    }],
+    ["an object-valued enum", "V2Balance/properties/choice: object-valued const or enum", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").choice = { enum: [{ a: 1 }] };
+    }],
+    ["an object inside a const array", "V2Balance/properties/fixed: object-valued const or enum", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").fixed = { const: [{ a: 1 }] };
+    }],
+    ["an object nested in an enum value", "V2Balance/properties/choice: object-valued const or enum", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").choice = { enum: [[{ a: 1 }]] };
+    }],
+    // A key-dependent rule can reject an additive key that arrives without its companion.
+    ["dependentRequired on a reached node", "V2Money: unsupported keyword dependentRequired", (doc) => {
+      at(doc, "components", "schemas", "V2Money").dependentRequired = { amount: ["currency"] };
+    }],
+    ["a non-string $ref in a reached schema", "V2Balance/properties/broken: malformed $ref", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").broken = { $ref: 7 };
+    }],
+    ["a self-referencing shared request body", "cyclic request body $ref #/components/requestBodies/Loop", (doc) => {
+      at(doc, "components").requestBodies = { Loop: { $ref: "#/components/requestBodies/Loop" } };
+      at(doc, "paths", "/v2/orders/create", "post").requestBody = { $ref: "#/components/requestBodies/Loop" };
+    }],
+    ["a two-step request body cycle", "cyclic request body $ref #/components/requestBodies/A", (doc) => {
+      at(doc, "components").requestBodies = {
+        A: { $ref: "#/components/requestBodies/B" },
+        B: { $ref: "#/components/requestBodies/A" },
+      };
+      at(doc, "paths", "/v2/orders/create", "post").requestBody = { $ref: "#/components/requestBodies/A" };
+    }],
+    ["a non-string request body $ref beside valid content", "#/paths/~1v2~1orders~1create/post/requestBody: malformed request body $ref", (doc) => {
+      const body = at(doc, "paths", "/v2/orders/create", "post", "requestBody");
+      body.$ref = 7;
+    }],
+    // A response the walk cannot reach must fail, never pass as an empty body.
+    ["a dangling response $ref", "#/paths/~1v1~1balance/get/responses/401: unresolved $ref #/components/responses/DoesNotExist", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses")["401"] = { $ref: "#/components/responses/DoesNotExist" };
+    }],
+    ["a non-string response $ref", "#/paths/~1v1~1balance/get/responses/401: malformed response $ref", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses")["401"] = { $ref: 7 };
+    }],
+    ["a self-referencing shared response", "cyclic response $ref #/components/responses/Loop", (doc) => {
+      at(doc, "components", "responses").Loop = { $ref: "#/components/responses/Loop" };
+      at(doc, "paths", "/v1/balance", "get", "responses")["401"] = { $ref: "#/components/responses/Loop" };
+    }],
+    ["a media type without a schema", "#/paths/~1v1~1balance/get/responses/200/content/application~1json: media type without a schema", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses", "200").content = { "application/json": {} };
+    }],
+    ["response content that is not an object", "#/paths/~1v1~1balance/get/responses/200: malformed response content", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses", "200").content = "application/json";
+    }],
+    ["a response that is not an object", "#/paths/~1v1~1balance/get/responses/401: malformed response", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses")["401"] = "Unauthorized";
+    }],
+    // The same class inside schemas: a structure the walk cannot read fails.
+    ["a schema that is neither an object nor a boolean", "V2Balance/properties/bad: malformed schema", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").bad = "string";
+    }],
+    ["properties that are not an object", "V2Money: malformed properties", (doc) => {
+      at(doc, "components", "schemas", "V2Money").properties = [{ type: "object" }];
+    }],
+    ["items that are not a schema", "V2Balance/properties/list: malformed items", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").list = { type: "array", items: [{ type: "object" }] };
+    }],
+    ["an allOf that is not an array", "V2Balance/properties/combo: malformed allOf", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").combo = { allOf: { type: "object" } };
+    }],
+    // A $ref must point at the kind of object its position expects.
+    ["a response $ref that points at a schema", "#/paths/~1v1~1balance/get/responses/401: unsupported response $ref #/components/schemas/V2Balance", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses")["401"] = { $ref: "#/components/schemas/V2Balance" };
+    }],
+    ["a schema $ref that points at a response", "#/components/schemas/V2Balance/properties/balance: unsupported $ref #/components/responses/Unauthorized", (doc) => {
+      at(doc, "components", "schemas", "V2Balance", "properties").balance = { $ref: "#/components/responses/Unauthorized" };
+    }],
+    ["a webhook body $ref", "#/webhooks/orderEvent/post/requestBody: unsupported webhook body $ref #/components/schemas/WebhookEvent", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post").requestBody = { $ref: "#/components/schemas/WebhookEvent" };
+    }],
+    // Every container the walk iterates must be readable, or the walk fails.
+    ["a webhook defined by $ref", "#/webhooks/orderEvent: unsupported webhook path item $ref", (doc) => {
+      at(doc, "webhooks").orderEvent = { $ref: "#/components/pathItems/OrderEvent" };
+    }],
+    ["a path item that is not an object", "#/paths/~1v1~1balance: malformed path item", (doc) => {
+      at(doc, "paths")["/v1/balance"] = "GET";
+    }],
+    ["an operation that is not an object", "#/paths/~1v1~1balance/get: malformed operation", (doc) => {
+      at(doc, "paths", "/v1/balance").get = "balance";
+    }],
+    ["a responses map that is not an object", "#/paths/~1v1~1balance/get: malformed responses", (doc) => {
+      at(doc, "paths", "/v1/balance", "get").responses = ["200"];
+    }],
+    // Webhook operations are server-sent too: callbacks, header parameters.
+    ["callbacks on a webhook operation", "#/webhooks/orderEvent/post: unsupported callbacks", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post").callbacks = {
+        onUpdate: { "{$request.body#/url}": { post: { requestBody: { content: { "application/json": { schema: { type: "object", properties: { a: { type: "string" } } } } } } } } },
+      };
+    }],
+    ["an object schema in a webhook header parameter", "#/components/parameters/WebhookSignatureHeader/schema: unclassified", (doc) => {
+      at(doc, "components", "parameters", "WebhookSignatureHeader").schema = { type: "object", properties: { a: { type: "string" } } };
+    }],
+    ["a webhook parameter with content", "#/components/parameters/WebhookSignatureHeader: unsupported parameter content", (doc) => {
+      at(doc, "components", "parameters", "WebhookSignatureHeader").content = { "application/json": { schema: { type: "object" } } };
+    }],
+    ["a webhook parameter $ref outside the parameters", "#/webhooks/orderEvent/post/parameters/0: unsupported parameter $ref #/components/schemas/V2Balance", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post").parameters = [{ $ref: "#/components/schemas/V2Balance" }];
+    }],
+    ["an object schema in a webhook path-item parameter", "#/webhooks/orderEvent/parameters/0/schema: unclassified", (doc) => {
+      at(doc, "webhooks", "orderEvent").parameters = [
+        { name: "X-Debug", in: "header", schema: { type: "object", properties: { a: { type: "string" } } } },
+      ];
+    }],
+    // Response headers are server-sent: their schemas are walked like bodies.
+    ["an object schema in a response header", "#/components/responses/TooManyRequests/headers/X-Debug/schema: unclassified", (doc) => {
+      at(doc, "components", "responses", "TooManyRequests", "headers")["X-Debug"] = {
+        schema: { type: "object", properties: { a: { type: "string" } } },
+      };
+    }],
+    ["a response header with content", "#/components/responses/TooManyRequests/headers/X-Debug: unsupported header content", (doc) => {
+      at(doc, "components", "responses", "TooManyRequests", "headers")["X-Debug"] = {
+        content: { "application/json": { schema: { type: "object" } } },
+      };
+    }],
+    ["a response header $ref", "#/components/responses/TooManyRequests/headers/X-Debug: unsupported header $ref #/components/headers/Debug", (doc) => {
+      at(doc, "components", "responses", "TooManyRequests", "headers")["X-Debug"] = { $ref: "#/components/headers/Debug" };
+    }],
+    // Callbacks are server-sent requests the walk does not read.
+    ["callbacks on an operation", "#/paths/~1v2~1orders~1create/post: unsupported callbacks", (doc) => {
+      at(doc, "paths", "/v2/orders/create", "post").callbacks = {
+        onUpdate: { "{$request.body#/url}": { post: { requestBody: { content: { "application/json": { schema: { type: "object" } } } } } } },
+      };
+    }],
+    // Every member of an OpenAPI object the walk reads is walked or fails closed:
+    // multipart part headers under `encoding` carry schemas, for one.
+    ["an object schema in a webhook multipart part header", "#/webhooks/orderEvent/post/requestBody/content/multipart~1form-data: unsupported media type member encoding", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post", "requestBody", "content")["multipart/form-data"] = {
+        schema: { $ref: "#/components/schemas/WebhookEvent" },
+        encoding: { data: { headers: { "X-Probe": { schema: { type: "object", properties: { new_field: { type: "string" } } } } } } },
+      };
+    }],
+    ["encoding on a response media type", "#/paths/~1v1~1balance/get/responses/200/content/application~1json: unsupported media type member encoding", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses", "200", "content", "application/json").encoding = {
+        data: { headers: { "X-Probe": { schema: { type: "object", properties: { a: { type: "string" } } } } } },
+      };
+    }],
+    ["encoding on a request media type", "#/paths/~1v2~1orders~1create/post/requestBody/content/application~1json: unsupported media type member encoding", (doc) => {
+      at(doc, "paths", "/v2/orders/create", "post", "requestBody", "content", "application/json").encoding = {
+        quantity: { contentType: "text/plain" },
+      };
+    }],
+    ["an OpenAPI 3.2 itemSchema on a response media type", "#/paths/~1v1~1balance/get/responses/200/content/application~1json: unsupported media type member itemSchema", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses", "200", "content", "application/json").itemSchema = {
+        type: "object",
+        properties: { a: { type: "string" } },
+      };
+    }],
+    ["an OpenAPI 3.2 query operation on a path", "#/paths/~1v1~1balance: unsupported path item member query", (doc) => {
+      at(doc, "paths", "/v1/balance").query = at(doc, "paths", "/v1/balance", "get");
+    }],
+    ["OpenAPI 3.2 additionalOperations on a path", "#/paths/~1v1~1balance: unsupported path item member additionalOperations", (doc) => {
+      at(doc, "paths", "/v1/balance").additionalOperations = { LINK: at(doc, "paths", "/v1/balance", "get") };
+    }],
+    ["an OpenAPI 3.2 query operation on a webhook", "#/webhooks/orderEvent: unsupported path item member query", (doc) => {
+      at(doc, "webhooks", "orderEvent").query = at(doc, "webhooks", "orderEvent", "post");
+    }],
+    ["a Swagger 2.0 schema directly on a response", "#/paths/~1v1~1balance/get/responses/200: unsupported response member schema", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses", "200").schema = { type: "object", properties: { a: { type: "string" } } };
+    }],
+    ["a Swagger 2.0 type directly on a response header", "#/components/responses/TooManyRequests/headers/X-Debug: unsupported header member type", (doc) => {
+      at(doc, "components", "responses", "TooManyRequests", "headers")["X-Debug"] = {
+        type: "object",
+        properties: { a: { type: "string" } },
+      };
+    }],
+    ["a Swagger 2.0 type directly on a webhook parameter", "#/components/parameters/WebhookSignatureHeader: unsupported parameter member type", (doc) => {
+      Object.assign(at(doc, "components", "parameters", "WebhookSignatureHeader"), {
+        type: "object",
+        properties: { a: { type: "string" } },
+      });
+    }],
+    ["headers on a webhook body", "#/webhooks/orderEvent/post/requestBody: unsupported request body member headers", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post", "requestBody").headers = {
+        "X-Probe": { schema: { type: "object", properties: { a: { type: "string" } } } },
+      };
+    }],
+    ["a schema directly on a webhook operation", "#/webhooks/orderEvent/post: unsupported operation member schema", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post").schema = { type: "object", properties: { a: { type: "string" } } };
+    }],
+    ["a schema directly on a path operation", "#/paths/~1v1~1balance/get: unsupported operation member schema", (doc) => {
+      at(doc, "paths", "/v1/balance", "get").schema = { type: "object", properties: { a: { type: "string" } } };
+    }],
+    // A Reference Object defines only $ref, summary and description.
+    ["content beside a response $ref", "#/paths/~1v1~1balance/get/responses/401: unsupported reference member content", (doc) => {
+      at(doc, "paths", "/v1/balance", "get", "responses")["401"] = {
+        $ref: "#/components/responses/Unauthorized",
+        content: { "application/json": { schema: { type: "object", properties: { a: { type: "string" } } } } },
+      };
+    }],
+    ["a schema beside a webhook parameter $ref", "#/webhooks/orderEvent/post/parameters/0: unsupported reference member schema", (doc) => {
+      at(doc, "webhooks", "orderEvent", "post").parameters = [
+        {
+          $ref: "#/components/parameters/WebhookSignatureHeader",
+          schema: { type: "object", properties: { a: { type: "string" } } },
+        },
+      ];
+    }],
+    // Keywords that change how a $ref resolves or which dialect applies, earlier-draft
+    // schema-bearing keywords, and a discriminator mapping all fail closed.
+    ...(
+      [
+        ["$id", "https://example.com/money"],
+        ["$anchor", "money"],
+        ["$dynamicAnchor", "money"],
+        ["$recursiveAnchor", true],
+        ["$schema", "http://json-schema.org/draft-07/schema#"],
+        ["$vocabulary", { "https://json-schema.org/draft/2020-12/vocab/core": true }],
+        ["dependencies", { amount: { properties: { a: { type: "object" } } } }],
+        ["additionalItems", { type: "object", properties: { a: { type: "string" } } }],
+        ["discriminator", { propertyName: "currency", mapping: { USD: "#/components/schemas/NotWalked" } }],
+      ] as const
+    ).map(([keyword, value]): [string, string, (doc: Record<string, unknown>) => void] => [
+      `${keyword} on a reached node`,
+      `V2Money: unsupported keyword ${keyword}`,
+      (doc) => {
+        at(doc, "components", "schemas", "V2Money")[keyword] = value;
+      },
+    ]),
+  ];
+  for (const [name, expected, mutate] of mutants) {
+    it(`the lock catches ${name}`, () => {
+      const doc = load();
+      mutate(doc);
+      const violations = policyViolations(doc);
+      expect(violations.some((v) => v.includes(expected)), violations.join("\n")).toBe(true);
+    });
+  }
+
+  it("the lock accepts vendor extensions and every optional OpenAPI 3.1 member it reads", () => {
+    const doc = load();
+    const balance = at(doc, "paths", "/v1/balance");
+    Object.assign(balance, { "x-note": 1, summary: "s", description: "d", servers: [{ url: "https://example.com" }] });
+    Object.assign(at(balance, "get"), { "x-note": 1, deprecated: false, externalDocs: { url: "https://example.com" } });
+    const ok = at(balance, "get", "responses", "200");
+    Object.assign(ok, { "x-note": 1, links: { self: { operationId: "getBalance" } } });
+    Object.assign(at(ok, "content", "application/json"), { "x-note": 1, example: { success: true, data: {} } });
+    Object.assign(at(doc, "components", "responses", "TooManyRequests", "headers", "Retry-After"), {
+      "x-note": 1,
+      required: false,
+      deprecated: false,
+      style: "simple",
+      explode: false,
+      example: 5,
+    });
+    Object.assign(at(doc, "components", "parameters", "WebhookSignatureHeader"), {
+      "x-note": 1,
+      deprecated: false,
+      style: "simple",
+      explode: false,
+      example: "t=1,v1=00",
+    });
+    at(balance, "get", "responses")["401"] = {
+      $ref: "#/components/responses/Unauthorized",
+      summary: "s",
+      description: "d",
+    };
+    const hook = at(doc, "webhooks", "orderEvent");
+    Object.assign(hook, { "x-note": 1, summary: "s", description: "d" });
+    Object.assign(at(hook, "post"), { "x-note": 1 });
+    Object.assign(at(hook, "post", "requestBody"), { "x-note": 1, description: "d" });
+    Object.assign(at(hook, "post", "requestBody", "content", "application/json"), { "x-note": 1 });
+    expect(policyViolations(doc)).toEqual([]);
+  });
+
+  it("the lock accepts a shared request body that wraps a closed request schema", () => {
+    const doc = load();
+    at(doc, "components").requestBodies = {
+      OrderId: { content: { "application/json": { schema: { $ref: "#/components/schemas/V1OrderIdRequest" } } } },
+    };
+    at(doc, "paths", "/v1/orders/cancel", "post").requestBody = { $ref: "#/components/requestBodies/OrderId" };
+    expect(policyViolations(doc)).toEqual([]);
+  });
+
+  it("the published view accepts an unknown response key", () => {
+    const harness = buildContractHarness(readFileSync(OPENAPI_PATH, "utf8"), { view: "published" });
+    const validate = harness.schemaValidator("V2Balance");
+    const balance = {
+      currency: "USD",
+      balance: { amount: "1.0000", currency: "USD" },
+      x: 1,
+    };
+    // Shape-only: the point is that `x` is not rejected.
+    validate(balance);
+    expect((validate.errors ?? []).some((e) => e.keyword === "additionalProperties")).toBe(false);
+  });
+
+  it("the published view still rejects an unknown request key", () => {
+    const harness = buildContractHarness(readFileSync(OPENAPI_PATH, "utf8"), { view: "published" });
+    const validate = harness.schemaValidator("V2CreateOrderRequest");
+    validate({ catalog_product_id: 88, x: 1 });
+    expect((validate.errors ?? []).some((e) => e.keyword === "additionalProperties")).toBe(true);
+  });
+});
 
 // ───── every published media example validates against its adjacent schema ─────
 // OpenAPI examples are executable contract fixtures, not illustrative prose. Walk
@@ -232,6 +704,7 @@ describe("every published OpenAPI media example validates against its schema", (
 describe("contract harness (offline, fixture-driven)", () => {
   const yamlText = readFileSync(OPENAPI_PATH, "utf8");
   const harness = buildContractHarness(yamlText);
+  const publishedHarness = buildContractHarness(yamlText, { view: "published" });
 
   it("ACCEPTS a spec-shaped /v1 countries envelope", () => {
     const validate = harness.responseValidator("/v1/catalog/countries", "get");
@@ -373,17 +846,25 @@ describe("contract harness (offline, fixture-driven)", () => {
     expect(bad).toBe(false);
   });
 
-  it("REJECTS a WebhookConfig with an unexpected extra field (additionalProperties:false)", () => {
+  const webhookConfigWithExtra = {
+    webhook_url: null,
+    webhook_secret: null,
+    webhook_disabled_at: null,
+    webhook_disabled_reason: null,
+    webhook_consecutive_failures: 0,
+    surprise_field: "drift",
+  };
+
+  it("REJECTS a WebhookConfig with an unexpected extra field under the strict view", () => {
+    // Our own payloads stay pinned to the documented keys (tested-closed marker).
     const validate = harness.schemaValidator("WebhookConfig");
-    const bad = validate({
-      webhook_url: null,
-      webhook_secret: null,
-      webhook_disabled_at: null,
-      webhook_disabled_reason: null,
-      webhook_consecutive_failures: 0,
-      surprise_field: "drift",
-    });
-    expect(bad).toBe(false);
+    expect(validate(webhookConfigWithExtra)).toBe(false);
+  });
+
+  it("ACCEPTS a WebhookConfig with an extra field under the published contract", () => {
+    // Responses are additive: consumers must ignore keys they do not know.
+    const validate = publishedHarness.schemaValidator("WebhookConfig");
+    expect(validate(webhookConfigWithExtra), publishedHarness.formatErrors(validate)).toBe(true);
   });
 
   it("ACCEPTS a WebhookTestResult fixture (status_code)", () => {
@@ -508,11 +989,10 @@ describe("contract harness (offline, fixture-driven)", () => {
     expect(bad).toBe(false);
   });
 
-  it("REJECTS a WebhookEventData payload with an unknown field (additionalProperties:false lock)", () => {
-    // WebhookEventData is `additionalProperties: false`, so a strict consumer
-    // generated from the published schema REJECTS unknown keys. This proves the
-    // lock the #394C R2 finding was about: the schema now matches the
-    // runtime payload EXACTLY — no more, no less.
+  it("REJECTS a WebhookEventData payload with an unknown field under the strict view", () => {
+    // The strict view closes WebhookEventData (tested-closed marker), so our own
+    // payloads still match the documented keys EXACTLY — the lock the #394C R2
+    // finding was about. The published contract itself is additive.
     const validate = harness.schemaValidator("WebhookEventData");
     const bad = validate({
       order_id: 90210,

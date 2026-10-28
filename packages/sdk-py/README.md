@@ -54,7 +54,7 @@ with client:
             print(f"Order {order_id} is {current['status']}; no automatic action taken")
 ```
 
-`wait_for_otp` waits for a classified code. Active-order reads and webhooks still expose a delivered SMS when `otp_code` is `None` and `otp_message` contains the exact message text. Rapid SMS webhook deliveries are unordered; compare `sms_revision` and ignore an older code/message pair.
+`wait_for_otp` waits for a classified code. Active-order reads and webhooks still expose a delivered SMS when `otp_code` is `None` and `otp_message` contains the exact message text after U+0000 removal. Rapid SMS webhook deliveries are unordered; compare `sms_revision` and ignore an older code/message pair.
 
 ## Operator (carrier) selection
 

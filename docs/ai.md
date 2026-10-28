@@ -12,6 +12,7 @@ Compact integration guidance for coding agents building on the SMSCode virtual-n
 3. **Auth is `Authorization: Bearer <token>`** on every request (token from Account Settings). No cookies, no separate API-key header.
 4. **Idempotency is money safety.** Order create sends an `idempotency-key`. On a FAILED create, **retry with the SAME key — never mint a new one.** A new key on retry can double-charge you (the server dedups by key → at-most-once). With the SDK, the key is on the thrown error: reuse `error.idempotencyKey`.
 5. **Honor `Retry-After`.** On `429` / `503`, the response sets a `Retry-After` header (seconds). Back off for that long before retrying. The SDK exposes it as `error.retryAfterSeconds` and applies it automatically when `maxRetries > 0`.
+6. **Ignore unknown fields.** Responses and webhook payloads may gain new fields at any time, without a version change: ignore keys you do not recognize, and never reject a response or a webhook because of one. Request bodies are strict: send only the documented fields. Removing or renaming a field, or changing its type or meaning, only happens on a new versioned surface.
 
 ## Money shapes
 
@@ -196,7 +197,7 @@ if (event.event === "order.otp_received") {
 }
 ```
 
-`order.otp_received` is the stable event name for every novel SMS. `otp_code` is nullable and `otp_message` carries the exact SMS text. Delivery is unordered when multiple SMS messages arrive quickly, but each event contains a self-consistent aggregate code/message snapshot. A retained code may come from an earlier SMS than the latest message, so do not assume both fields coexisted in one provider message. Use the monotonic `sms_revision` to reject an older aggregate pair.
+`order.otp_received` is the stable event name for every novel SMS. `otp_code` is nullable and `otp_message` carries the exact SMS text after U+0000 removal. Delivery is unordered when multiple SMS messages arrive quickly, but each event contains a self-consistent aggregate code/message snapshot. A retained code may come from an earlier SMS than the latest message, so do not assume both fields coexisted in one provider message. Use the monotonic `sms_revision` to reject an older aggregate pair.
 
 ## Python SDK recipe
 
@@ -229,7 +230,7 @@ with client:
             client.orders.cancel(order_id)
 ```
 
-For resend flows, preserve the previous code:
+For resend flows, preserve the previous code. On `/v2`, order reads carry `resend_mode`: `auto` means further SMS arrive by themselves (`can_resend` stays false and a resend returns `resent: false`), and `manual` means an eligible order can request another SMS with resend:
 
 ```py
 first = client.orders.wait_for_otp(order_id)

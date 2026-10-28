@@ -154,3 +154,13 @@ async def test_async_webhook_resource_mirrors_sync_paths() -> None:
     assert route.called
     assert isinstance(config, WebhookConfig)
     assert config.webhook_url is None
+
+
+def test_webhook_parser_accepts_unknown_keys() -> None:
+    raw = (
+        '{"event": "order.expired", "timestamp": "2026-05-11T09:05:00+00:00", '
+        '"future_field": 1, "data": {"order_id": 90210, "product_id": 1024, "future_field": "x"}}'
+    )
+    event = parse_webhook_event(raw)
+    assert event["event"] == "order.expired"
+    assert event["data"]["future_field"] == "x"

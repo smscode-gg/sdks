@@ -160,6 +160,18 @@ describe("verifyWebhookSignature — constant-time compare (structure)", () => {
 });
 
 describe("parseWebhookEvent — typed discriminated union", () => {
+  it("accepts unknown top-level and data keys (webhook payloads are additive)", () => {
+    const raw = {
+      event: "order.expired",
+      timestamp: "2026-05-11T09:05:00+00:00",
+      future_field: 1,
+      data: { order_id: 90210, product_id: 1024, future_field: "x" },
+    };
+    const evt = parseWebhookEvent(JSON.stringify(raw));
+    expect(evt.event).toBe("order.expired");
+    expect((evt.data as Record<string, unknown>).future_field).toBe("x");
+  });
+
   it("narrows an order.expired payload by the `event` discriminant", () => {
     const raw = {
       event: "order.expired",

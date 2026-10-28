@@ -146,4 +146,4 @@ export type {
 export type { paths, components, operations, webhooks } from "./types.gen.js";
 
 /** SDK package version. Kept in sync with package.json `version`. */
-export const VERSION = "1.2.0";
+export const VERSION = "1.3.0";

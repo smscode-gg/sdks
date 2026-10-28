@@ -231,3 +231,49 @@ def test_cancel_is_not_auto_retried() -> None:
             client.orders.cancel(1)
 
     assert route.call_count == 1
+
+
+def _v2_order_body(**extra: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "id": 1,
+        "status": "OTP_RECEIVED",
+        "product_id": 10,
+        "amount": {
+            "amount": "0.0077",
+            "currency": "USD",
+            "canonical_amount": 139,
+            "canonical_currency": "IDR",
+        },
+        "otp_code": "123456",
+        "can_finish": True,
+        "can_resend": False,
+        "can_cancel": False,
+        "can_replace": False,
+        "can_reactivate": False,
+        "resend_available_at": None,
+        "cancel_available_at": None,
+        "replace_available_at": None,
+        **extra,
+    }
+    return {
+        "success": True,
+        "data": data,
+        "meta": {"fx": {"pair": "USD/IDR", "rate": 17970, "rate_as_of": None}},
+    }
+
+
+def test_v2_order_decodes_resend_mode() -> None:
+    with respx.mock(base_url="https://api.smscode.gg") as router:
+        router.get("/v2/orders/1").respond(200, json=_v2_order_body(resend_mode="auto"))
+        with SmscodeClient(token="tok") as client:
+            order = client.orders.get(1)
+    assert order.capabilities.resend_mode == "auto"
+
+
+def test_order_without_resend_mode_decodes_to_none() -> None:
+    # A 1.2.0-shaped body (no resend_mode) still decodes: absence is never an error.
+    with respx.mock(base_url="https://api.smscode.gg") as router:
+        router.get("/v2/orders/1").respond(200, json=_v2_order_body())
+        with SmscodeClient(token="tok") as client:
+            order = client.orders.get(1)
+    assert order.capabilities.resend_mode is None
