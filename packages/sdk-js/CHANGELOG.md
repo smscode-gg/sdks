@@ -5,9 +5,8 @@ All notable changes to `@smscode/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This is the first stable release. The public surface follows Semantic
-Versioning: a breaking change bumps the major version. `1.0.0` publishes under
-the npm `latest` dist-tag.
+The public surface follows Semantic Versioning: a breaking change bumps the
+major version. Stable releases publish under the npm `latest` dist-tag.
 
 ## [1.3.0] — 2026-10-28
 
@@ -102,9 +101,10 @@ dependencies — runs on Node 18+, Bun, Deno, and browsers (anything with `fetch
 ### Notes
 
 - **Distribution:** published from the public [`smscode-gg/sdks`](https://github.com/smscode-gg/sdks)
-  repo. The npm package is live as `@smscode/sdk@1.0.0` under the default **`latest`** dist-tag.
+  repo. `@smscode/sdk@1.0.0` was published under the default **`latest`** dist-tag.
 - **License:** MIT (a `LICENSE` file is included in the published tarball).
 
+[1.3.0]: https://github.com/smscode-gg/sdks/releases/tag/v1.3.0
 [1.2.0]: https://github.com/smscode-gg/sdks/releases/tag/v1.2.0
 [1.1.0]: https://github.com/smscode-gg/sdks/releases/tag/v1.1.0
 [1.0.0]: https://github.com/smscode-gg/sdks/releases/tag/v1.0.0
